@@ -37,7 +37,11 @@ const SPIDER_PRESSURE_BANDS := [
 const ROUTE_X := [-150.0, 0.0, 150.0]
 ## Legacy fallback only; runtime stage durations come from StageDatabase lengths.
 const STAGE_DURATION_SECONDS := 22.4
-const STAGE_COUNT := 240
+## Compatibility high-water mark, never a finish line.
+static var STAGE_COUNT := 0
+const STAGES_BEHIND := 2
+const STAGES_AHEAD := 3
+const STAGE_WINDOW_SIZE := STAGES_BEHIND + 1 + STAGES_AHEAD
 const ENDLESS_SPEED_RAMP_SECONDS := 180.0
 const ENDLESS_MAX_SPEED_SCALE := 2.0
 const DIFFICULTY_STEP_SECONDS := 20.0

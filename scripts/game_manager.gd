@@ -150,6 +150,7 @@ var level_up_remaining := 0.0
 var double_reward_remaining := 0.0
 var last_stage_gold_reward := 0
 var death_count_by_stage := {}
+var archived_deaths := 0
 var continue_used_this_run := false
 var continue_checkpoint := {}
 var max_lives := 3
@@ -420,8 +421,9 @@ func _exit_tree() -> void:
 	economy.flush_climb_save()
 
 func _debug_evidence_stage(stage_number: int) -> void:
-	if not _debug_state_enabled() or stage_number < 1 or stage_number > Balance.STAGE_COUNT:
+	if not _debug_state_enabled() or stage_number < 1:
 		return
+	stages.ensure_stage(stage_number + Balance.STAGES_AHEAD)
 	player.global_position = Vector2(0, -(stages.stage_start_height(stage_number) + stages.stage_length(stage_number) * 0.35))
 	spider.reset_run(player.global_position + Vector2(0, _spider_start_gap(stage_number)))
 	player._sync_stage_mode()
@@ -520,6 +522,7 @@ func restart() -> void:
 	fire_wings_started_remaining = 0.0
 	fire_wings_used_stage.clear()
 	death_count_by_stage.clear()
+	archived_deaths = 0
 	continue_used_this_run = false
 	continue_checkpoint = {}
 	current_lives = max_lives
@@ -723,33 +726,11 @@ func restart_stage() -> void:
 	_publish_readonly_web_state()
 
 func _on_prototype_completed() -> void:
-	economy.flush_climb_save()
-	resume_available = false
-	state = State.PROTOTYPE_COMPLETE
-	completed_stages[Balance.STAGE_COUNT] = true
-	_commit_run_completion()
-	_start_final_cinematic()
+	# Endless runs end only on death; a generated horizon is not a summit.
+	pass
 
 func _commit_run_completion() -> void:
-	if completion_committed:
-		return
-	completion_committed = true
-	var full_run := completed_stages.size() == Balance.STAGE_COUNT
-	for stage_number in range(1, Balance.STAGE_COUNT + 1):
-		full_run = full_run and completed_stages.has(stage_number)
-	if not full_run:
-		return
-	var earned := {}
-	if mode == MODE_NORMAL and challenge_eligible:
-		earned = {
-			"NO BEAN HIT": beans.hit_count == 0,
-			"NO ROCK HIT": rocks.hit_count == 0,
-			"NO DAMAGE": damage_events == 0,
-			"UNDER 12 MINUTES": total_time < 720.0,
-			"NO SKILLS": skills_used == 0,
-			"ZERO SPIDER RED ZONE": not spider_red_zone_seen,
-		}
-	save_manager.record_completion(mode, total_time, earned)
+	pass
 
 func _start_final_cinematic() -> void:
 	final_t = 0.0
@@ -821,21 +802,29 @@ func _complete_menu() -> void:
 		_show_menu()
 
 func _on_stage_completed(stage_number: int) -> void:
-	if not tutorial_active and stage_number == ghost_stage:
+	if not tutorial_active and stage_number == ghost_stage and stage_number <= 30:
 		save_manager.record_stage_ghost(mode, stage_number, ghost_stage_elapsed, ghost_trace)
 	completed_stages[stage_number] = true
+	for old in death_count_by_stage.keys():
+		if int(old) < stage_number - Balance.STAGES_BEHIND:
+			archived_deaths += int(death_count_by_stage[old])
+			death_count_by_stage.erase(old)
+	for history: Dictionary in [completed_stages, time_wings_used_stage, fire_wings_used_stage, ad_revives_by_stage]:
+		for old in history.keys():
+			if int(old) < stage_number - Balance.STAGES_BEHIND:
+				history.erase(old)
 	var player_body := player.get_node_or_null("Body")
 	if player_body != null and player_body.has_method("play_celebration"):
 		player_body.play_celebration()
 	var reward := economy.complete_stage(stage_number)
-	economy.mark_stage_completed(stage_number)
+	if stage_number <= 30:
+		economy.mark_stage_completed(stage_number)
 	last_stage_gold_reward = int(reward.gold)
 	reward_toast_remaining = 0.0
 	double_reward_remaining = 0.0
 	$HUD/RewardToast.text = "+%d GOLD  +%d XP" % [reward.gold, reward.xp]
-	if stage_number < Balance.STAGE_COUNT:
-		_show_tutorial_for_stage(stage_number + 1)
-		_reset_stage_ghost(stage_number + 1)
+	_show_tutorial_for_stage(stage_number + 1)
+	_reset_stage_ghost(stage_number + 1)
 
 func try_time_wings() -> bool:
 	var stage_number := stages.stage_for_y(player.global_position.y)
@@ -1273,9 +1262,11 @@ func _skip_stage_with_ad() -> void:
 	platform_services.show_rewarded("skip_stage", _skip_stage_after_reward.bind(stage_number))
 
 func _skip_stage_after_reward(stage_number: int) -> void:
-	if app_state != AppState.PLAYER_DEAD or stage_number >= Balance.STAGE_COUNT:
+	if app_state != AppState.PLAYER_DEAD:
 		return
-	save_manager.mark_stage_skipped(stage_number)
+	if stage_number <= 30:
+		save_manager.mark_stage_skipped(stage_number)
+	stages.ensure_stage(stage_number + 1 + Balance.STAGES_AHEAD)
 	stages.current_stage = stage_number + 1
 	var next_y := stages.stage_bottom_y(stage_number + 1)
 	player.reset_run(Vector2(0, next_y))
@@ -2382,7 +2373,7 @@ func _update_hud() -> void:
 	$HUD/TouchFire.visible = normal_playing and DisplayServer.is_touchscreen_available()
 	_refresh_sound_icon()
 	$HUD/StageBanner.text = stages.stage_banner if stages.stage_banner_remaining > 0.0 and app_state == AppState.PLAYING else ""
-	$HUD/StageCounter.text = "STAGE %d / 30" % stages.stage_for_y(player.global_position.y)
+	$HUD/StageCounter.text = "STAGE %d" % stages.stage_for_y(player.global_position.y)
 	var route_hint_visible := tutorial_text != "CHANGE BRANCH" or stages.branch_targets_visible(player.global_position.y, get_viewport_rect().size.y)
 	$HUD/Tutorial.text = tutorial_text if tutorial_remaining > 0.0 and app_state == AppState.PLAYING and route_hint_visible else ""
 	$HUD/TimeWings.text = _time_wings_status()
@@ -2476,7 +2467,7 @@ func _stats_text() -> String:
 	var mm := total_seconds / 60
 	var ss := total_seconds % 60
 	var best_m := best_spider_distance / Balance.PIXELS_PER_METER
-	var deaths := 0
+	var deaths := archived_deaths
 	for count in death_count_by_stage.values(): deaths += int(count)
 	var record: Dictionary = save_manager.replay_snapshot().records.get(mode, {})
 	var personal_best := float(record.get("best_time", 0.0))
@@ -2655,7 +2646,7 @@ func _apply_debug_meta_overrides() -> void:
 			continue
 		if parts[0] == "gold": economy.gold = maxi(int(parts[1]), 0)
 		if parts[0] == "level": economy.level = maxi(int(parts[1]), 1)
-		if parts[0] == "stage": debug_start_stage = clampi(int(parts[1]), 1, Balance.STAGE_COUNT)
+		if parts[0] == "stage": debug_start_stage = maxi(int(parts[1]), 1)
 
 func _sync_pet(_snapshot := {}) -> void:
 	if pet_follower == null:
@@ -2669,8 +2660,9 @@ func _sync_pet(_snapshot := {}) -> void:
 	pet_follower.set_pet(equipped_pet)
 
 func _start_debug_stage(stage_number: int) -> void:
-	if stage_number <= 1 or stage_number > Balance.STAGE_COUNT:
+	if stage_number <= 1:
 		return
+	stages.ensure_stage(stage_number + Balance.STAGES_AHEAD)
 	var start_y := stages.stage_bottom_y(stage_number)
 	player.reset_run(Vector2(0.0, start_y))
 	climb_previous_y = player.global_position.y

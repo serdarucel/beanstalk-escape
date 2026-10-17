@@ -12,7 +12,7 @@ static func placements_for_stage(stage_number: int, count: int, stages: StageMan
 	var result: Array = []
 	if count <= 0:
 		return result
-	var definition := StageDatabase.stage(stage_number, stages.run_variant)
+	var definition: Dictionary = stages.stage_records.get(stage_number, {})
 	var encounters: Array = definition.get("encounters", [])
 	if encounters.is_empty():
 		return result
@@ -66,7 +66,7 @@ static func placements_for_stage(stage_number: int, count: int, stages: StageMan
 		var base_height := float(previous.occupancy[1]) + HAZARD_CLEARANCE_PX - rise
 		if index == 1:
 			base_height = maxf(HAZARD_CLEARANCE_PX, base_height)
-			if StageDatabase.template_for(stage_number) == 13:
+			if stages.template_for_stage(stage_number) == 13:
 				base_height = maxf(base_height, float(first.anchor) - 280.0)
 		if stage_number > 2 and not stages.transfer_window_open(stage_number, base_height / stages.stage_length(stage_number)):
 			continue

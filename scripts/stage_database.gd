@@ -298,12 +298,10 @@ static func _repace_anchors(encounters: Array, stage: Dictionary, preferred_star
 static func _fallback_stage_length(stage_number: int) -> int:
 	return DEFAULT_STAGE_LENGTH if stage_number <= 9 else DEFAULT_LATE_STAGE_LENGTH
 
-static func stages_for_variant(variant: String) -> Array:
-	return _cached_stages_for_variant(variant).duplicate(true)
-
-static func _cached_stages_for_variant(variant: String) -> Array:
+## Each variant owns a resumable RNG cursor and only the live stage window.
+static func _stream_for_variant(variant: String) -> Dictionary:
 	if variant not in QA_VARIANTS:
-		return []
+		return {}
 	if _sequence_cache.has(variant):
 		return _sequence_cache[variant]
 	var templates := canonical_stages()
@@ -315,10 +313,31 @@ static func _cached_stages_for_variant(variant: String) -> Array:
 				_mirror_recipe(encounter.recipe)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = active_run_seed
-	var stages: Array = []
-	var recent_templates: Array[int] = []
-	var accumulated_height := 0
-	for number in range(1, Balance.STAGE_COUNT + 1):
+	var stream := {"templates": templates, "rng": rng, "records": {}, "recent": [], "next": 1, "height": 0}
+	_sequence_cache[variant] = stream
+	return stream
+
+static func stages_for_variant(variant: String) -> Array:
+	var stream := _stream_for_variant(variant)
+	if stream.is_empty():
+		return []
+	if stream.records.is_empty():
+		stage(Balance.STAGES_AHEAD + 1, variant)
+	return stream.records.values().duplicate(true)
+
+static func retain_from(first_stage: int, variant: String) -> void:
+	var stream := _stream_for_variant(variant)
+	for number in stream.get("records", {}).keys():
+		if int(number) < first_stage:
+			stream.records.erase(number)
+
+static func _generate_through(stage_number: int, stream: Dictionary) -> void:
+	var rng: RandomNumberGenerator = stream.rng
+	var templates: Array = stream.templates
+	var recent_templates: Array = stream.recent
+	while int(stream.next) <= stage_number:
+		var number := int(stream.next)
+		var accumulated_height := int(stream.height)
 		var tier := Balance.difficulty_tier_for_time(Balance.estimated_time_for_height(float(accumulated_height)))
 		var template_number := number
 		if number >= 4:
@@ -335,12 +354,19 @@ static func _cached_stages_for_variant(variant: String) -> Array:
 		stage["start_height"] = accumulated_height
 		accumulated_height += int(stage.length)
 		stage["target_height"] = accumulated_height
-		stages.append(stage)
+		# Template encounter IDs repeat; runtime IDs must identify this chunk.
+		for index in stage.encounters.size():
+			stage.encounters[index]["id"] = "S%02d-E%02d" % [number, index + 1]
+		stream.records[number] = stage
+		stream.next = number + 1
+		stream.height = accumulated_height
+		# Also bound direct database requests that skip ahead.
+		for old_number in stream.records.keys():
+			if int(old_number) < number - Balance.STAGE_WINDOW_SIZE + 1:
+				stream.records.erase(old_number)
 		recent_templates.append(template_number)
 		if recent_templates.size() > 3:
 			recent_templates.pop_front()
-	_sequence_cache[variant] = stages
-	return stages
 
 static func _mirror_recipe(recipe: Dictionary) -> void:
 	match String(recipe.kind):
@@ -358,16 +384,14 @@ static func _mirror_recipe(recipe: Dictionary) -> void:
 			for threat: Dictionary in recipe.threats: _mirror_recipe(threat)
 
 static func stage(stage_number: int, variant := CANONICAL_VARIANT) -> Dictionary:
-	var stages := _cached_stages_for_variant(variant)
-	if stage_number < 1 or stage_number > stages.size():
+	var stream := _stream_for_variant(variant)
+	if stage_number < 1 or stream.is_empty():
 		return {}
-	return (stages[stage_number - 1] as Dictionary).duplicate(true)
+	_generate_through(stage_number, stream)
+	return stream.records.get(stage_number, {}).duplicate(true)
 
 static func template_for(n: int) -> int:
-	var stages := _cached_stages_for_variant(CANONICAL_VARIANT)
-	if n < 1 or n > stages.size():
-		return 0
-	return int(stages[n - 1].template)
+	return int(stage(n).get("template", 0))
 
 static func _mirror_sequence(values: Array) -> Array:
 	var result: Array = []

@@ -57,15 +57,6 @@ func _clear_active_hazards() -> void:
 
 func _build_campaign_catalog() -> void:
 	campaign_slots_by_stage.clear()
-	if stages == null:
-		return
-	for pattern: Dictionary in stages.patterns:
-		var stage_slots: Array = []
-		for slot: Dictionary in pattern.get("rock_slots", []):
-			var descriptor := slot.duplicate(true)
-			descriptor["anchor_y"] = stages.stage_bottom_y(int(pattern.stage)) - float(slot.anchor)
-			stage_slots.append(descriptor)
-		campaign_slots_by_stage[int(pattern.stage)] = stage_slots
 
 func refresh_active_window(force := false) -> void:
 	if sandbox_active or player == null or stages == null:
@@ -75,7 +66,7 @@ func refresh_active_window(force := false) -> void:
 		return
 	active_center_stage = center_stage
 	var wanted: Dictionary = {}
-	for stage_number in range(maxi(1, center_stage - 1), mini(Balance.STAGE_COUNT, center_stage + 1) + 1):
+	for stage_number in range(maxi(stages.first_stage, center_stage - 1), center_stage + 2):
 		wanted[stage_number] = true
 	for stage_value in loaded_stages.keys():
 		var loaded_stage := int(stage_value)
@@ -84,13 +75,22 @@ func refresh_active_window(force := false) -> void:
 		for index in range(hazards.size() - 1, -1, -1):
 			var hazard := hazards[index]
 			if int(hazard.get_meta("campaign_stage", -1)) == loaded_stage:
+				hit_ids.erase(hazard.hazard_id)
+				warning_ids.erase(hazard.hazard_id)
 				hazards.remove_at(index)
 				if is_instance_valid(hazard): hazard.queue_free()
 		loaded_stages.erase(loaded_stage)
+		campaign_slots_by_stage.erase(loaded_stage)
 	for stage_value in wanted.keys():
 		var stage_number := int(stage_value)
 		if loaded_stages.has(stage_number):
 			continue
+		var stage_slots: Array = []
+		for slot: Dictionary in stages.pattern_for_stage(stage_number).get("rock_slots", []):
+			var descriptor := slot.duplicate(true)
+			descriptor["anchor_y"] = stages.stage_bottom_y(stage_number) - float(slot.anchor)
+			stage_slots.append(descriptor)
+		campaign_slots_by_stage[stage_number] = stage_slots
 		for descriptor: Dictionary in campaign_slots_by_stage.get(stage_number, []):
 			var hazard := _spawn(String(descriptor.id), String(descriptor.kind), descriptor.routes, float(descriptor.anchor_y))
 			hazard.set_meta("campaign_stage", stage_number)

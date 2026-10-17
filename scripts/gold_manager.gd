@@ -28,9 +28,6 @@ func reset_run() -> void:
 	placements_by_stage.clear()
 	loaded_stages.clear()
 	active_center_stage = -1
-	for stage_number in range(1, Balance.STAGE_COUNT + 1):
-		var count := economy.stage_gold_count(stage_number)
-		placements_by_stage[stage_number] = GoldPlacementData.placements_for_stage(stage_number, count, stages)
 	refresh_active_window(true)
 
 func _physics_process(delta: float) -> void:
@@ -75,7 +72,7 @@ func refresh_active_window(force := false) -> void:
 		return
 	active_center_stage = center_stage
 	var wanted: Dictionary = {}
-	for stage_number in range(maxi(1, center_stage - 1), mini(Balance.STAGE_COUNT, center_stage + 1) + 1):
+	for stage_number in range(maxi(stages.first_stage, center_stage - 1), center_stage + 2):
 		wanted[stage_number] = true
 	for stage_value in loaded_stages.keys():
 		var loaded_stage := int(stage_value)
@@ -85,10 +82,15 @@ func refresh_active_window(force := false) -> void:
 			if int(child.get_meta("campaign_stage", -1)) == loaded_stage:
 				child.queue_free()
 		loaded_stages.erase(loaded_stage)
+		for placement: Dictionary in placements_by_stage.get(loaded_stage, []):
+			collected_ids.erase(String(placement.id))
+			combo_ahead_ids.erase(String(placement.id))
+		placements_by_stage.erase(loaded_stage)
 	for stage_value in wanted.keys():
 		var stage_number := int(stage_value)
 		if loaded_stages.has(stage_number):
 			continue
+		placements_by_stage[stage_number] = GoldPlacementData.placements_for_stage(stage_number, economy.stage_gold_count(stage_number), stages)
 		for placement: Dictionary in placements_by_stage.get(stage_number, []):
 			if not collected_ids.has(String(placement.id)):
 				_spawn(placement, stage_number)
