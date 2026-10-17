@@ -11,12 +11,18 @@ var sandbox_mode := false
 @onready var game: GameManager = get_parent() as GameManager
 const BEAN_SCENE := preload("res://scenes/bean_projectile.tscn")
 var nightmare_modifiers := StageDatabase.nightmare_modifiers()
+var active_center_stage := -1
 
 func _physics_process(_delta: float) -> void:
 	var nearby_patterns: Array = []
 	if not sandbox_mode:
 		var center_stage := stages.stage_for_y(player.global_position.y)
-		for stage_number in range(maxi(1, center_stage - 1), mini(Balance.STAGE_COUNT, center_stage + 1) + 1):
+		if center_stage != active_center_stage:
+			active_center_stage = center_stage
+			for key: String in spawned_keys.keys():
+				if int(key.get_slice(":", 0)) < center_stage - 1:
+					spawned_keys.erase(key)
+		for stage_number in range(maxi(stages.first_stage, center_stage - 1), center_stage + 2):
 			nearby_patterns.append(stages.pattern_for_stage(stage_number))
 	for stage_pattern: Dictionary in nearby_patterns:
 		for slot_index in stage_pattern.bean_slots.size():
@@ -84,5 +90,6 @@ func _hit(bean: BeanProjectile) -> void:
 func reset_run() -> void:
 	for bean in get_tree().get_nodes_in_group("beans"): bean.free()
 	spawned_keys.clear()
+	active_center_stage = -1
 	hit_count = 0
 	warning_count = 0

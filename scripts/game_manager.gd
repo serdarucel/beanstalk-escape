@@ -2,6 +2,7 @@ class_name GameManager
 extends Node2D
 
 const TIME_WINGS_ICON := preload("res://assets/art/character_rig/wing/time_wings.png")
+const DEAD_END_WARNING_ICON := preload("res://assets/art/gpt/items/warning_badge.png")
 const PET_FOLLOWER := preload("res://scripts/pet_follower.gd")
 const MODE_NORMAL := "NORMAL"
 const MODE_NIGHTMARE := "NIGHTMARE"
@@ -150,6 +151,7 @@ var level_up_remaining := 0.0
 var double_reward_remaining := 0.0
 var last_stage_gold_reward := 0
 var death_count_by_stage := {}
+var archived_deaths := 0
 var continue_used_this_run := false
 var continue_checkpoint := {}
 var max_lives := 3
@@ -420,8 +422,9 @@ func _exit_tree() -> void:
 	economy.flush_climb_save()
 
 func _debug_evidence_stage(stage_number: int) -> void:
-	if not _debug_state_enabled() or stage_number < 1 or stage_number > Balance.STAGE_COUNT:
+	if not _debug_state_enabled() or stage_number < 1:
 		return
+	stages.ensure_stage(stage_number + Balance.STAGES_AHEAD)
 	player.global_position = Vector2(0, -(stages.stage_start_height(stage_number) + stages.stage_length(stage_number) * 0.35))
 	spider.reset_run(player.global_position + Vector2(0, _spider_start_gap(stage_number)))
 	player._sync_stage_mode()
@@ -520,6 +523,7 @@ func restart() -> void:
 	fire_wings_started_remaining = 0.0
 	fire_wings_used_stage.clear()
 	death_count_by_stage.clear()
+	archived_deaths = 0
 	continue_used_this_run = false
 	continue_checkpoint = {}
 	current_lives = max_lives
@@ -723,33 +727,11 @@ func restart_stage() -> void:
 	_publish_readonly_web_state()
 
 func _on_prototype_completed() -> void:
-	economy.flush_climb_save()
-	resume_available = false
-	state = State.PROTOTYPE_COMPLETE
-	completed_stages[Balance.STAGE_COUNT] = true
-	_commit_run_completion()
-	_start_final_cinematic()
+	# Endless runs end only on death; a generated horizon is not a summit.
+	pass
 
 func _commit_run_completion() -> void:
-	if completion_committed:
-		return
-	completion_committed = true
-	var full_run := completed_stages.size() == Balance.STAGE_COUNT
-	for stage_number in range(1, Balance.STAGE_COUNT + 1):
-		full_run = full_run and completed_stages.has(stage_number)
-	if not full_run:
-		return
-	var earned := {}
-	if mode == MODE_NORMAL and challenge_eligible:
-		earned = {
-			"NO BEAN HIT": beans.hit_count == 0,
-			"NO ROCK HIT": rocks.hit_count == 0,
-			"NO DAMAGE": damage_events == 0,
-			"UNDER 12 MINUTES": total_time < 720.0,
-			"NO SKILLS": skills_used == 0,
-			"ZERO SPIDER RED ZONE": not spider_red_zone_seen,
-		}
-	save_manager.record_completion(mode, total_time, earned)
+	pass
 
 func _start_final_cinematic() -> void:
 	final_t = 0.0
@@ -821,21 +803,29 @@ func _complete_menu() -> void:
 		_show_menu()
 
 func _on_stage_completed(stage_number: int) -> void:
-	if not tutorial_active and stage_number == ghost_stage:
+	if not tutorial_active and stage_number == ghost_stage and stage_number <= 30:
 		save_manager.record_stage_ghost(mode, stage_number, ghost_stage_elapsed, ghost_trace)
 	completed_stages[stage_number] = true
+	for old in death_count_by_stage.keys():
+		if int(old) < stage_number - Balance.STAGES_BEHIND:
+			archived_deaths += int(death_count_by_stage[old])
+			death_count_by_stage.erase(old)
+	for history: Dictionary in [completed_stages, time_wings_used_stage, fire_wings_used_stage, ad_revives_by_stage]:
+		for old in history.keys():
+			if int(old) < stage_number - Balance.STAGES_BEHIND:
+				history.erase(old)
 	var player_body := player.get_node_or_null("Body")
 	if player_body != null and player_body.has_method("play_celebration"):
 		player_body.play_celebration()
 	var reward := economy.complete_stage(stage_number)
-	economy.mark_stage_completed(stage_number)
+	if stage_number <= 30:
+		economy.mark_stage_completed(stage_number)
 	last_stage_gold_reward = int(reward.gold)
 	reward_toast_remaining = 0.0
 	double_reward_remaining = 0.0
 	$HUD/RewardToast.text = "+%d GOLD  +%d XP" % [reward.gold, reward.xp]
-	if stage_number < Balance.STAGE_COUNT:
-		_show_tutorial_for_stage(stage_number + 1)
-		_reset_stage_ghost(stage_number + 1)
+	_show_tutorial_for_stage(stage_number + 1)
+	_reset_stage_ghost(stage_number + 1)
 
 func try_time_wings() -> bool:
 	var stage_number := stages.stage_for_y(player.global_position.y)
@@ -921,6 +911,15 @@ func _lose_life(cause: DeathCause, respawn_from_checkpoint: bool) -> bool:
 		_publish_readonly_web_state()
 	return true
 
+func _end_wings() -> void:
+	time_wings_remaining = 0.0
+	time_wings_started_remaining = 0.0
+	fire_wings_remaining = 0.0
+	fire_wings_started_remaining = 0.0
+	player.time_wings_active = false
+	player.remove_from_group("time_wings_active")
+	player.fire_wings_active = false
+
 func _enter_player_dead(cause: DeathCause) -> void:
 	economy.flush_climb_save()
 	golds.reset_combo()
@@ -934,10 +933,7 @@ func _enter_player_dead(cause: DeathCause) -> void:
 	death_count_by_stage[dead_stage] = int(death_count_by_stage.get(dead_stage, 0)) + 1
 	dead_restart_delay = 0.25
 	confirm_pending = false
-	player.time_wings_active = false
-	player.remove_from_group("time_wings_active")
-	player.fire_wings_active = false
-	fire_wings_remaining = 0.0
+	_end_wings()
 	player.set_physics_process(false)
 	spider.set_physics_process(false)
 	beans.set_physics_process(false)
@@ -1009,6 +1005,7 @@ func _shop_from_death() -> void:
 
 func _respawn_at_continue_checkpoint() -> void:
 	golds.reset_combo()
+	_end_wings()
 	var safe_position: Vector2 = continue_checkpoint.get("position", player.global_position)
 	safe_position = _validated_continue_position(safe_position)
 	continue_checkpoint = {"position": safe_position, "stage": stages.stage_for_y(safe_position.y)}
@@ -1170,11 +1167,6 @@ func _show_shop() -> void:
 	meta_ui.open_shop()
 	_update_hud()
 
-func _show_map() -> void:
-	app_state = AppState.MAP
-	meta_ui.open_map()
-	_update_hud()
-
 func _show_character_select() -> void:
 	app_state = AppState.CHARACTER_SELECT
 	meta_ui.open_character_select()
@@ -1273,9 +1265,11 @@ func _skip_stage_with_ad() -> void:
 	platform_services.show_rewarded("skip_stage", _skip_stage_after_reward.bind(stage_number))
 
 func _skip_stage_after_reward(stage_number: int) -> void:
-	if app_state != AppState.PLAYER_DEAD or stage_number >= Balance.STAGE_COUNT:
+	if app_state != AppState.PLAYER_DEAD:
 		return
-	save_manager.mark_stage_skipped(stage_number)
+	if stage_number <= 30:
+		save_manager.mark_stage_skipped(stage_number)
+	stages.ensure_stage(stage_number + 1 + Balance.STAGES_AHEAD)
 	stages.current_stage = stage_number + 1
 	var next_y := stages.stage_bottom_y(stage_number + 1)
 	player.reset_run(Vector2(0, next_y))
@@ -1507,7 +1501,7 @@ func _update_danger(delta: float) -> void:
 		else:
 			danger_remaining -= delta
 		danger_pulse_elapsed += delta
-		danger_vignette_alpha = 0.45 + 0.25 * cos(danger_pulse_elapsed * TAU / 0.5)
+		danger_vignette_alpha = 0.875 + 0.075 * cos(danger_pulse_elapsed * TAU / 0.5)
 	else:
 		danger_vignette_alpha = move_toward(danger_vignette_alpha, 0.0, delta / 0.3)
 
@@ -1546,9 +1540,10 @@ func _setup_hud() -> void:
 	danger_shader.code = """shader_type canvas_item;
 render_mode unshaded;
 void fragment() {
-    vec2 edge_distance = min(UV, vec2(1.0) - UV);
-    float edge = 1.0 - smoothstep(0.0, 0.14, min(edge_distance.x, edge_distance.y));
-    COLOR = vec4(0.85, 0.015, 0.025, edge * COLOR.a);
+    // Screen pixel size tracks viewport resizing and portrait orientation.
+    vec2 edge_distance = min(SCREEN_UV, vec2(1.0) - SCREEN_UV) / SCREEN_PIXEL_SIZE;
+    float edge = clamp((28.0 - min(edge_distance.x, edge_distance.y)) / 18.0, 0.0, 1.0);
+    COLOR = vec4(0.85, 0.02, 0.03, edge * COLOR.a);
 }
 """
 	var danger_material := ShaderMaterial.new()
@@ -1580,9 +1575,7 @@ void fragment() {
 	_add_label("Menu", Vector2(320, 300), "CHOOSE AN OPTION", 22)
 	_add_action_button("Resume", "RESUME", _resume_from_menu)
 	_add_action_button("NewRun", "NEW RUN", _start_selected_run)
-	_add_action_button("Nightmare", "NIGHTMARE", _start_nightmare_run)
 	_add_action_button("Shop", "SHOP", _show_shop)
-	_add_action_button("Map", "MAP", _show_map)
 	_add_action_button("HowToPlay", "HOW TO PLAY", _replay_tutorial)
 	_add_action_button("Credits", "CREDITS", _show_credits)
 	_build_daily_card()
@@ -1731,6 +1724,16 @@ void fragment() {
 	wings_orb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	wings_orb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$HUD.add_child(wings_orb)
+	var dead_end_badge := TextureRect.new()
+	dead_end_badge.name = "DeadEndWarning"
+	dead_end_badge.texture = DEAD_END_WARNING_ICON
+	dead_end_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	dead_end_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	dead_end_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dead_end_badge.size = Vector2(64.0, 64.0)
+	dead_end_badge.z_index = 10
+	dead_end_badge.visible = false
+	$HUD.add_child(dead_end_badge)
 	var wings_bar := ProgressBar.new()
 	wings_bar.name = "TimeWingsBar"
 	wings_bar.max_value = Balance.TIME_WINGS_SECONDS
@@ -1755,7 +1758,6 @@ void fragment() {
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		result_badges.append(badge)
 	_add_action_button("CompleteNewRun", "PLAY AGAIN", _complete_new_run)
-	_add_action_button("CompleteNightmare", "NIGHTMARE", _start_nightmare_run)
 	_add_action_button("CompleteMenu", "MENU", _complete_menu)
 	final_character = Sprite2D.new()
 	final_character.name = "FinalCharacter"
@@ -1944,9 +1946,7 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/Resume.size = Vector2(menu_width, menu_button_height)
 	if resume_available:
 		primary_y += menu_button_height + menu_gap
-	var primary_buttons: Array[Button] = [$HUD/NewRun, $HUD/Shop, $HUD/Map]
-	if bool(save_manager.replay_snapshot().nightmare_unlocked):
-		primary_buttons.append($HUD/Nightmare)
+	var primary_buttons: Array[Button] = [$HUD/NewRun, $HUD/Shop]
 	menu_width = minf(menu_width, (width - 32.0 - menu_gap * (primary_buttons.size() - 1)) / primary_buttons.size())
 	var menu_row_width := menu_width * primary_buttons.size() + menu_gap * (primary_buttons.size() - 1)
 	var menu_x := (width - menu_row_width) * 0.5
@@ -2009,14 +2009,12 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	for index in result_badges.size():
 		result_badges[index].position = Vector2(content_x + column_width + content_gap, content_top + 28.0 + index * badge_step)
 		result_badges[index].size = Vector2(column_width, 24.0 if compact else 32.0)
-	var complete_width := minf(190.0, (width - 48.0) / 3.0)
-	var complete_start := (width - complete_width * 3.0 - 12.0) * 0.5
+	var complete_width := minf(190.0, (width - 48.0) / 2.0)
+	var complete_start := (width - complete_width * 2.0 - 6.0) * 0.5
 	var complete_y := height - (60.0 if compact else 68.0)
 	$HUD/CompleteNewRun.position = Vector2(complete_start, complete_y)
 	$HUD/CompleteNewRun.size = Vector2(complete_width, 48.0 if compact else 52.0)
-	$HUD/CompleteNightmare.position = Vector2(complete_start + complete_width + 6.0, complete_y)
-	$HUD/CompleteNightmare.size = Vector2(complete_width, 48.0 if compact else 52.0)
-	$HUD/CompleteMenu.position = Vector2(complete_start + (complete_width + 6.0) * 2.0, complete_y)
+	$HUD/CompleteMenu.position = Vector2(complete_start + complete_width + 6.0, complete_y)
 	$HUD/CompleteMenu.size = Vector2(complete_width, 48.0 if compact else 52.0)
 	var touch_y := height - 148.0
 	$HUD/TouchLeft.position = Vector2(18.0, touch_y)
@@ -2279,7 +2277,43 @@ func _update_lives_hud() -> void:
 			heart.animate_loss()
 	displayed_lives = current_lives
 
+func _dead_end_warning_snapshot() -> Dictionary:
+	var route := player.active_branch
+	var distance := stages.next_dead_end_distance(player.global_position.y, player.global_position.x, route)
+	var stage_number := stages.stage_for_y(player.global_position.y)
+	# Keep the time lead across chunk boundaries; the stage query only sees its own chunk.
+	if stage_number >= 3 and is_inf(distance):
+		var next_y := stages.stage_bottom_y(stage_number + 1)
+		distance = player.global_position.y - next_y + stages.next_dead_end_distance(next_y, player.global_position.x, route)
+	var speed := player.climb_speed()
+	var seconds := distance / speed if speed > 0.0 else INF
+	var eligible := app_state == AppState.PLAYING and not tutorial_active and stage_number >= 3
+	return {
+		"visible": eligible and distance > 0.0 and speed > 0.0 and distance <= speed * Balance.DEAD_END_WARNING_SECONDS,
+		"route": route,
+		# -1 means there is no upcoming dead end (or no positive climb speed).
+		"distance_px": -1.0 if is_inf(distance) else distance,
+		"seconds_to_dead_end": -1.0 if is_inf(seconds) else seconds,
+	}
+
+func _update_dead_end_warning() -> void:
+	var warning := $HUD/DeadEndWarning as TextureRect
+	var info := _dead_end_warning_snapshot()
+	warning.visible = info.visible
+	if not warning.visible:
+		return
+	var end_y := player.global_position.y - float(info.distance_px)
+	var end_x := stages.branch_x_at(int(info.route), end_y) + ScaleLock.vine_visual_offset(int(info.route), end_y)
+	var screen_point := player.get_canvas_transform() * Vector2(end_x, end_y)
+	var hud_point := warning.get_canvas_transform().affine_inverse() * screen_point
+	var viewport_size := get_viewport_rect().size
+	warning.position = Vector2(
+		clampf(hud_point.x - warning.size.x * 0.5, 12.0, maxf(12.0, viewport_size.x - warning.size.x - 12.0)),
+		clampf(hud_point.y - warning.size.y - 16.0, 140.0, maxf(140.0, viewport_size.y - warning.size.y - 12.0))
+	)
+
 func _update_hud() -> void:
+	_update_dead_end_warning()
 	var playing := app_state == AppState.PLAYING
 	var normal_playing := playing and not tutorial_active
 	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0
@@ -2298,16 +2332,13 @@ func _update_hud() -> void:
 	for badge in result_badges:
 		badge.visible = result_visible
 	$HUD/CompleteNewRun.visible = result_visible
-	$HUD/CompleteNightmare.visible = result_visible and bool(save_manager.replay_snapshot().nightmare_unlocked)
 	$HUD/CompleteMenu.visible = result_visible
 	player.visible = not result_visible
 	spider.visible = not result_visible
 	$HUD/MenuLogo.visible = app_state == AppState.MENU
 	$HUD/Resume.visible = app_state == AppState.MENU and resume_available
 	$HUD/NewRun.visible = app_state == AppState.MENU
-	$HUD/Nightmare.visible = app_state == AppState.MENU and bool(save_manager.replay_snapshot().nightmare_unlocked)
 	$HUD/Shop.visible = app_state == AppState.MENU
-	$HUD/Map.visible = app_state == AppState.MENU
 	$HUD/HowToPlay.visible = app_state == AppState.MENU
 	$HUD/Credits.visible = app_state == AppState.MENU
 	daily_card.visible = app_state == AppState.MENU
@@ -2382,7 +2413,7 @@ func _update_hud() -> void:
 	$HUD/TouchFire.visible = normal_playing and DisplayServer.is_touchscreen_available()
 	_refresh_sound_icon()
 	$HUD/StageBanner.text = stages.stage_banner if stages.stage_banner_remaining > 0.0 and app_state == AppState.PLAYING else ""
-	$HUD/StageCounter.text = "STAGE %d / 30" % stages.stage_for_y(player.global_position.y)
+	$HUD/StageCounter.text = "STAGE %d" % stages.stage_for_y(player.global_position.y)
 	var route_hint_visible := tutorial_text != "CHANGE BRANCH" or stages.branch_targets_visible(player.global_position.y, get_viewport_rect().size.y)
 	$HUD/Tutorial.text = tutorial_text if tutorial_remaining > 0.0 and app_state == AppState.PLAYING and route_hint_visible else ""
 	$HUD/TimeWings.text = _time_wings_status()
@@ -2476,7 +2507,7 @@ func _stats_text() -> String:
 	var mm := total_seconds / 60
 	var ss := total_seconds % 60
 	var best_m := best_spider_distance / Balance.PIXELS_PER_METER
-	var deaths := 0
+	var deaths := archived_deaths
 	for count in death_count_by_stage.values(): deaths += int(count)
 	var record: Dictionary = save_manager.replay_snapshot().records.get(mode, {})
 	var personal_best := float(record.get("best_time", 0.0))
@@ -2554,6 +2585,9 @@ func _readonly_state_snapshot() -> Dictionary:
 		})
 	return {
 		"app_state": AppState.keys()[app_state],
+		"node_count": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"object_count": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		"static_memory_mb": Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
 		"run_time": total_time,
 		"score": int(score),
 		"run_coins": run_coins,
@@ -2603,6 +2637,7 @@ func _readonly_state_snapshot() -> Dictionary:
 		"beans": state_beans,
 		"storm": storm.snapshot(),
 		"next_dead_end": {"route": dead_end_route, "distance_px": null if is_inf(dead_end_distance) else dead_end_distance},
+		"dead_end_warning": _dead_end_warning_snapshot(),
 		"open_routes_at_player": stages.open_routes_at(player.global_position.y),
 		"active_branch": player.active_branch,
 		"support_state": player.support_state_name(),
@@ -2655,7 +2690,7 @@ func _apply_debug_meta_overrides() -> void:
 			continue
 		if parts[0] == "gold": economy.gold = maxi(int(parts[1]), 0)
 		if parts[0] == "level": economy.level = maxi(int(parts[1]), 1)
-		if parts[0] == "stage": debug_start_stage = clampi(int(parts[1]), 1, Balance.STAGE_COUNT)
+		if parts[0] == "stage": debug_start_stage = maxi(int(parts[1]), 1)
 
 func _sync_pet(_snapshot := {}) -> void:
 	if pet_follower == null:
@@ -2669,8 +2704,9 @@ func _sync_pet(_snapshot := {}) -> void:
 	pet_follower.set_pet(equipped_pet)
 
 func _start_debug_stage(stage_number: int) -> void:
-	if stage_number <= 1 or stage_number > Balance.STAGE_COUNT:
+	if stage_number <= 1:
 		return
+	stages.ensure_stage(stage_number + Balance.STAGES_AHEAD)
 	var start_y := stages.stage_bottom_y(stage_number)
 	player.reset_run(Vector2(0.0, start_y))
 	climb_previous_y = player.global_position.y

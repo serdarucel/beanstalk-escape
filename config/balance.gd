@@ -2,6 +2,8 @@ class_name Balance
 extends RefCounted
 
 const PLAYER_VERTICAL_SPEED := 125.0
+## StageDatabase.WARNING_LEAD / PLAYER_VERTICAL_SPEED: preserve the 1x lead time.
+const DEAD_END_WARNING_SECONDS := 2.88
 const PLAYER_HORIZONTAL_SPEED := 680.0
 const PLAYER_HORIZONTAL_ACCELERATION := 6000.0
 const BRANCH_TRANSITION_SECONDS := 0.40
@@ -37,7 +39,11 @@ const SPIDER_PRESSURE_BANDS := [
 const ROUTE_X := [-150.0, 0.0, 150.0]
 ## Legacy fallback only; runtime stage durations come from StageDatabase lengths.
 const STAGE_DURATION_SECONDS := 22.4
-const STAGE_COUNT := 240
+## Compatibility high-water mark, never a finish line.
+static var STAGE_COUNT := 0
+const STAGES_BEHIND := 2
+const STAGES_AHEAD := 3
+const STAGE_WINDOW_SIZE := STAGES_BEHIND + 1 + STAGES_AHEAD
 const ENDLESS_SPEED_RAMP_SECONDS := 180.0
 const ENDLESS_MAX_SPEED_SCALE := 2.0
 const DIFFICULTY_STEP_SECONDS := 20.0

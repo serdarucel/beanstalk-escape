@@ -76,8 +76,9 @@ static func _routes_connected_at_tick(stage: Dictionary, from_route: int, to_rou
 	var world_height := float(tick) / PHYSICS_HZ * Balance.PLAYER_VERTICAL_SPEED
 	var local_height := world_height - float(stage.start_height)
 	for encounter: Dictionary in stage.encounters:
-		if String(encounter.recipe.kind) != "FORK":
+		if local_height < float(encounter.anchor) or local_height > float(encounter.occupancy[1]):
 			continue
-		if local_height >= float(encounter.anchor) and local_height <= float(encounter.occupancy[1]):
-			return encounter.recipe.supports.has(from_route) and encounter.recipe.supports.has(to_route)
+		for threat: Dictionary in StageDatabase.threats_for_recipe(encounter.recipe):
+			if String(threat.kind) == "FORK" and (not threat.supports.has(from_route) or not threat.supports.has(to_route)):
+				return false
 	return true

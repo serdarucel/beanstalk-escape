@@ -69,20 +69,6 @@ func reset_run() -> void:
 	active_center_stage = -1
 	if stages != null:
 		stages.clear_runtime_hazards()
-		for pattern: Dictionary in stages.patterns:
-			var stage_slots: Array = []
-			for source: Dictionary in pattern.get("storm_slots", []):
-				var slot := source.duplicate(true)
-				slot["stage"] = int(pattern.stage)
-				slot["stage_bottom_y"] = stages.stage_bottom_y(int(pattern.stage))
-				slot["clock"] = 0.0
-				slot["touched"] = false
-				slot["active"] = false
-				slot["finished"] = false
-				slot["life_spent"] = false
-				slot["warning_visible_seconds"] = 0.0
-				stage_slots.append(slot)
-			campaign_slots_by_stage[int(pattern.stage)] = stage_slots
 	refresh_active_window(true)
 	if beans != null:
 		beans.sandbox_mode = sandbox_active
@@ -131,7 +117,17 @@ func refresh_active_window(force := false) -> void:
 		return
 	active_center_stage = center_stage
 	campaign_slots.clear()
-	for stage_number in range(maxi(1, center_stage - 1), mini(Balance.STAGE_COUNT, center_stage + 1) + 1):
+	for old in campaign_slots_by_stage.keys():
+		if int(old) < center_stage - 1 or int(old) > center_stage + 1:
+			campaign_slots_by_stage.erase(old)
+	for stage_number in range(maxi(stages.first_stage, center_stage - 1), center_stage + 2):
+		if not campaign_slots_by_stage.has(stage_number):
+			var slots: Array = []
+			for source: Dictionary in stages.pattern_for_stage(stage_number).get("storm_slots", []):
+				var slot := source.duplicate(true)
+				slot.merge({"stage": stage_number, "stage_bottom_y": stages.stage_bottom_y(stage_number), "clock": 0.0, "touched": false, "active": false, "finished": false, "life_spent": false, "warning_visible_seconds": 0.0})
+				slots.append(slot)
+			campaign_slots_by_stage[stage_number] = slots
 		for source: Dictionary in campaign_slots_by_stage.get(stage_number, []):
 			campaign_slots.append(source)
 
