@@ -113,12 +113,4 @@ static func _append_coin(result: Array, stage_number: int, local_position: Vecto
 	})
 
 static func _route_survives(encounter: Dictionary, route: int) -> bool:
-	for threat: Dictionary in StageDatabase.threats_for_recipe(encounter.recipe):
-		var kind := String(threat.kind)
-		if kind == "FORK" and not threat.supports.has(route):
-			return false
-		if kind in ["BEAN", "S", "R", "F", "K", "WEB"] and int(threat.lane) == route:
-			return false
-		if kind in ["WALL", "M"] and threat.lanes.has(route):
-			return false
-	return true
+	return StageDatabase.route_survives(encounter.recipe, route)

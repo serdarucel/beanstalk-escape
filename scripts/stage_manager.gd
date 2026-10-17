@@ -172,20 +172,31 @@ func _patterns_for_records(source_stages: Array) -> Array:
 			var kind := String(encounter.recipe.kind)
 			if kind == "GUIDE" or kind == "BULGE":
 				trunk_features.append({"id": encounter.id, "kind": kind, "x": float(encounter.recipe.x), "warning_height": encounter.warning_height, "occupancy": encounter.occupancy})
-			elif kind == "FORK":
-				support_windows.append({"id": encounter.id, "start_progress": float(encounter.anchor) / float(stage.length), "end_progress": float(encounter.occupancy[1]) / float(stage.length), "supports": encounter.recipe.supports.duplicate(), "warning_progress": float(encounter.warning_height) / float(stage.length)})
 			for threat: Dictionary in StageDatabase.threats_for_recipe(encounter.recipe):
 				var threat_kind := String(threat.kind)
-				if threat_kind == "BEAN":
+				if threat_kind == "FORK":
+					support_windows.append({"id": encounter.id, "start_progress": float(encounter.anchor) / float(stage.length), "end_progress": float(encounter.occupancy[1]) / float(stage.length), "supports": threat.supports.duplicate(), "warning_progress": float(encounter.warning_height) / float(stage.length)})
+				elif threat_kind == "BEAN":
 					var blocked := int(threat.lane)
+					var volley_end := float(encounter.anchor) + 120.0 + 70.0 * float(int(threat.get("count", 1)) - 1)
+					var supported := _routes_supported_over(stage, [0, 1, 2], float(encounter.anchor), maxf(volley_end, float(encounter.occupancy[1])))
+					if not supported.has(blocked):
+						continue
 					var slot_progress := float(encounter.anchor) / float(stage.length)
-					var safe_routes := [0, 1, 2]
+					var safe_routes := supported.duplicate()
 					safe_routes.erase(blocked)
 					bean_slots.append({"id": "%s-B%d" % [encounter.id, blocked], "anchor": encounter.anchor, "warning_height": encounter.warning_height, "occupancy": encounter.occupancy, "progress": slot_progress, "blocked_route": blocked, "safe_routes": safe_routes, "safety_route": int(encounter.witness), "warning_seconds": Balance.BEAN_WARNING_SECONDS, "count": int(threat.get("count", 1))})
 				elif threat_kind in ["S", "R", "F", "WALL", "M"]:
 					var routes: Array = threat.get("lanes", [int(threat.get("lane", 1))])
+					var supported := _routes_supported_over(stage, routes, float(encounter.anchor), float(encounter.anchor) + 180.0)
+					# Moving stones require both endpoints; never alter their motion.
+					if supported.is_empty() or (threat_kind == "M" and supported.size() != routes.size()):
+						continue
+					routes = supported
 					rock_slots.append({"id": "%s-%s-%d" % [encounter.id, threat_kind, rock_slots.size()], "kind": threat_kind, "routes": routes.duplicate(), "anchor": float(encounter.anchor), "warning_height": float(encounter.warning_height), "witness": int(encounter.witness)})
 				elif threat_kind in ["V", "K", "WEB"]:
+					if threat_kind != "V" and _routes_supported_over(stage, [int(threat.lane)], float(encounter.anchor), float(encounter.occupancy[1])).is_empty():
+						continue
 					storm_slots.append({
 						"id": "%s-%s-%d" % [encounter.id, threat_kind, storm_slots.size()],
 						"kind": threat_kind,
@@ -198,6 +209,19 @@ func _patterns_for_records(source_stages: Array) -> Array:
 					})
 		result.append({"stage": stage_number, "length": stage.length, "start_height": stage.start_height, "entry": 1, "open_routes": open_routes, "route_end_progress": route_end_progress, "trunk_features": trunk_features, "support_windows": support_windows, "bean_slots": bean_slots, "rock_slots": rock_slots, "storm_slots": storm_slots, "encounters": stage.encounters, "variant": run_variant})
 	return result
+
+func _routes_supported_over(stage: Dictionary, routes: Array, start: float, end: float) -> Array:
+	var result := routes.duplicate()
+	if int(stage.number) <= 3:
+		return result
+	for encounter: Dictionary in stage.encounters:
+		if end < float(encounter.anchor) or start > float(encounter.occupancy[1]):
+			continue
+		for threat: Dictionary in StageDatabase.threats_for_recipe(encounter.recipe):
+			if String(threat.kind) == "FORK":
+				result = result.filter(func(route: int) -> bool: return threat.supports.has(route))
+	return result
+
 func pattern_hash(seed_value: int) -> int: return hash(var_to_str(generate_patterns(seed_value)))
 func patterns_are_reachable(candidate: Array) -> bool:
 	var reachable_routes: Array[int] = []

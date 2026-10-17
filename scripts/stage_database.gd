@@ -9,6 +9,8 @@ const DEFAULT_STAGE_LENGTH := 2800
 const DEFAULT_LATE_STAGE_LENGTH := 3000
 const WARNING_LEAD := 360
 const OCCUPANCY_HEIGHT := 220
+const ENDLESS_DEAD_END_INTERVAL_SECONDS := 15.0
+const ENDLESS_DEAD_END_FIRST_SECONDS := 20.0
 const STAGE_TEMPO_CONFIG_PATH := "res://config/stage_tempo.json"
 const REPLAY_NIGHTMARE_CONFIG_PATH := "res://config/replay_nightmare.json"
 
@@ -243,6 +245,17 @@ static func _densify_encounters(stage: Dictionary) -> Array:
 static func threats_for_recipe(recipe: Dictionary) -> Array:
 	return recipe.threats if String(recipe.kind) == "COMBO" else [recipe]
 
+static func route_survives(recipe: Dictionary, route: int) -> bool:
+	for threat: Dictionary in threats_for_recipe(recipe):
+		var kind := String(threat.kind)
+		if kind == "FORK" and not threat.supports.has(route):
+			return false
+		if kind in ["BEAN", "S", "R", "F", "K", "WEB"] and int(threat.lane) == route:
+			return false
+		if kind in ["WALL", "M"] and threat.lanes.has(route):
+			return false
+	return true
+
 static func _paced_encounters(stage: Dictionary) -> Array:
 	var source: Array = stage.encounters
 	var result: Array = []
@@ -313,7 +326,7 @@ static func _stream_for_variant(variant: String) -> Dictionary:
 				_mirror_recipe(encounter.recipe)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = active_run_seed
-	var stream := {"templates": templates, "rng": rng, "records": {}, "recent": [], "next": 1, "height": 0}
+	var stream := {"templates": templates, "rng": rng, "records": {}, "recent": [], "next": 1, "height": 0, "last_dead_end_time": -INF, "lane_order": [2, 1, 0] if variant == MIRROR_VARIANT else [0, 1, 2]}
 	_sequence_cache[variant] = stream
 	return stream
 
@@ -357,6 +370,13 @@ static func _generate_through(stage_number: int, stream: Dictionary) -> void:
 		# Template encounter IDs repeat; runtime IDs must identify this chunk.
 		for index in stage.encounters.size():
 			stage.encounters[index]["id"] = "S%02d-E%02d" % [number, index + 1]
+		if number >= 4:
+			_add_endless_dead_end(stage, stream)
+		# Include the authored Stage 3 forks in the persistent cadence cursor.
+		for encounter: Dictionary in stage.encounters:
+			for threat: Dictionary in threats_for_recipe(encounter.recipe):
+				if String(threat.kind) == "FORK":
+					stream.last_dead_end_time = Balance.estimated_time_for_height(float(stage.start_height) + float(encounter.anchor))
 		stream.records[number] = stage
 		stream.next = number + 1
 		stream.height = accumulated_height
@@ -367,6 +387,52 @@ static func _generate_through(stage_number: int, stream: Dictionary) -> void:
 		recent_templates.append(template_number)
 		if recent_templates.size() > 3:
 			recent_templates.pop_front()
+
+static func _add_endless_dead_end(stage: Dictionary, stream: Dictionary) -> void:
+	for index in stage.encounters.size():
+		var encounter: Dictionary = stage.encounters[index]
+		var seconds := Balance.estimated_time_for_height(float(stage.start_height) + float(encounter.anchor))
+		if seconds < ENDLESS_DEAD_END_FIRST_SECONDS or seconds - float(stream.last_dead_end_time) < ENDLESS_DEAD_END_INTERVAL_SECONDS:
+			continue
+		var witness := int(encounter.witness)
+		if not route_survives(encounter.recipe, witness):
+			continue
+		# Prefer an otherwise usable branch. If hazards already cover both
+		# alternatives, runtime slots on the closed branch are omitted instead.
+		for prefer_free in [true, false]:
+			for lane_value in stream.lane_order:
+				var closed := int(lane_value)
+				if absi(closed - witness) != 1:
+					continue
+				if prefer_free and not route_survives(encounter.recipe, closed):
+					continue
+				if not _dead_end_preserves_transfers(stage, index, closed):
+					continue
+				var supports: Array = stream.lane_order.duplicate()
+				supports.erase(closed)
+				var threats := threats_for_recipe(encounter.recipe).duplicate(true)
+				threats.append({"kind": "FORK", "supports": supports})
+				encounter.recipe = {"kind": "COMBO", "threats": threats}
+				return
+
+static func _dead_end_preserves_transfers(stage: Dictionary, index: int, closed: int) -> bool:
+	var encounter: Dictionary = stage.encounters[index]
+	var witness := int(encounter.witness)
+	if index > 0:
+		var previous: Dictionary = stage.encounters[index - 1]
+		if float(previous.occupancy[1]) > float(encounter.anchor) and closed >= mini(int(previous.witness), witness) and closed <= maxi(int(previous.witness), witness):
+			return false
+	if index + 1 < stage.encounters.size():
+		var next: Dictionary = stage.encounters[index + 1]
+		if closed >= mini(witness, int(next.witness)) and closed <= maxi(witness, int(next.witness)):
+			# A transfer across the missing branch must wait for its return.
+			# Use the full 2x speed and unshortened transfer time conservatively.
+			var required_rise := float(absi(int(next.witness) - witness)) * Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE * (Balance.BRANCH_TRANSITION_SECONDS + Balance.BRANCH_COMMAND_BUFFER_SECONDS)
+			if float(next.anchor) - float(encounter.occupancy[1]) < required_rise:
+				return false
+	# The last occupancy ends at the chunk boundary; the next chunk has at
+	# least WARNING_LEAD pixels of fully supported entry for either witness.
+	return true
 
 static func _mirror_recipe(recipe: Dictionary) -> void:
 	match String(recipe.kind):

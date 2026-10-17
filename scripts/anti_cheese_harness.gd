@@ -98,9 +98,4 @@ static func _hazard_events(variant: String, final_stage: int) -> Array:
 	return events
 
 static func _route_survives(encounter: Dictionary, route: int) -> bool:
-	var kind := String(encounter.recipe.kind)
-	if kind == "FORK":
-		return encounter.recipe.supports.has(route)
-	if kind == "BEAN":
-		return int(encounter.recipe.lane) != route
-	return true
+	return StageDatabase.route_survives(encounter.recipe, route)
