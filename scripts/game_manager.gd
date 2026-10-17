@@ -1020,18 +1020,46 @@ func _respawn_at_continue_checkpoint() -> void:
 	_publish_readonly_web_state()
 
 func _validated_continue_position(candidate: Vector2) -> Vector2:
-	var stage_number := stages.stage_for_y(candidate.y)
 	var preferred_route := stages.route_for_x(candidate.x)
-	if stages.can_enter_route_at(stage_number, preferred_route, stages.progress_in_stage(candidate.y)):
-		return candidate
-	for step in range(1, 25):
-		var sample_y := candidate.y + float(step) * 24.0
-		if stages.stage_for_y(sample_y) != stage_number:
+	# Include a full transfer and command buffer after the normal warning lead.
+	var clearance := player.climb_speed() * (Balance.DEAD_END_WARNING_SECONDS + Balance.BRANCH_TRANSITION_SECONDS + Balance.BRANCH_COMMAND_BUFFER_SECONDS) + 1.0
+	var routes: Array[int] = [preferred_route]
+	for distance in [1, 2]:
+		for route in [preferred_route - distance, preferred_route + distance]:
+			if route >= 0 and route < 3:
+				routes.append(route)
+	var bottom_y := stages.stage_bottom_y(stages.first_stage)
+	var sample_y := minf(candidate.y, bottom_y)
+	while true:
+		var stage_number := stages.stage_for_y(sample_y)
+		for route in routes:
+			if _continue_route_has_clearance(sample_y, route, clearance):
+				# Reset attaches immediately; never preserve an in-between branch x.
+				var x := candidate.x if stage_number <= 2 and route == preferred_route else stages.branch_x_at(route, sample_y)
+				return Vector2(x, sample_y)
+		if sample_y >= bottom_y:
 			break
-		for route in [preferred_route, 1, 0, 2]:
-			if stages.can_enter_route_at(stage_number, route, stages.progress_in_stage(sample_y)):
-				return Vector2(stages.branch_x_at(route, sample_y), sample_y)
-	return Vector2(0.0, stages.stage_bottom_y(stage_number))
+		sample_y = minf(sample_y + 24.0, bottom_y)
+	push_error("No supported continue checkpoint with dead-end clearance in the retained stage window")
+	return Vector2(0.0, bottom_y)
+
+func _continue_route_has_clearance(world_y: float, route: int, clearance: float) -> bool:
+	var stage_number := stages.stage_for_y(world_y)
+	if not stages.can_enter_route_at(stage_number, route, stages.progress_in_stage(world_y)):
+		return false
+	var height := -world_y
+	var end_height := height + clearance
+	# A checkpoint near a chunk boundary must also see the next chunk's forks.
+	var last_number := stages.stage_for_y(-end_height)
+	for number in range(stage_number, last_number + 1):
+		for window: Dictionary in stages.pattern_for_stage(number).get("support_windows", []):
+			if window.supports.has(route):
+				continue
+			var start := stages.stage_start_height(number) + float(window.start_progress) * stages.stage_length(number)
+			var end := stages.stage_start_height(number) + float(window.end_progress) * stages.stage_length(number)
+			if end >= height and start <= end_height:
+				return false
+	return true
 
 func _update_hit_invulnerability(delta: float) -> void:
 	if app_state == AppState.PLAYING and hit_invulnerability_remaining > 0.0:
@@ -1203,9 +1231,10 @@ func _can_offer_ad_revive() -> bool:
 func _remember_continue_checkpoint() -> void:
 	if app_state != AppState.PLAYING or not player.on_support or player.support_state != PlayerController.SupportState.SUPPORTED:
 		return
+	var safe_position := _validated_continue_position(player.global_position)
 	continue_checkpoint = {
-		"position": player.global_position,
-		"stage": stages.stage_for_y(player.global_position.y),
+		"position": safe_position,
+		"stage": stages.stage_for_y(safe_position.y),
 	}
 
 func _resume_after_death() -> void:
