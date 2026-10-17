@@ -1506,7 +1506,7 @@ func _update_danger(delta: float) -> void:
 		else:
 			danger_remaining -= delta
 		danger_pulse_elapsed += delta
-		danger_vignette_alpha = 0.45 + 0.25 * cos(danger_pulse_elapsed * TAU / 0.5)
+		danger_vignette_alpha = 0.875 + 0.075 * cos(danger_pulse_elapsed * TAU / 0.5)
 	else:
 		danger_vignette_alpha = move_toward(danger_vignette_alpha, 0.0, delta / 0.3)
 
@@ -1545,9 +1545,10 @@ func _setup_hud() -> void:
 	danger_shader.code = """shader_type canvas_item;
 render_mode unshaded;
 void fragment() {
-    vec2 edge_distance = min(UV, vec2(1.0) - UV);
-    float edge = 1.0 - smoothstep(0.0, 0.14, min(edge_distance.x, edge_distance.y));
-    COLOR = vec4(0.85, 0.015, 0.025, edge * COLOR.a);
+    // Screen pixel size tracks viewport resizing and portrait orientation.
+    vec2 edge_distance = min(SCREEN_UV, vec2(1.0) - SCREEN_UV) / SCREEN_PIXEL_SIZE;
+    float edge = clamp((28.0 - min(edge_distance.x, edge_distance.y)) / 18.0, 0.0, 1.0);
+    COLOR = vec4(0.85, 0.02, 0.03, edge * COLOR.a);
 }
 """
 	var danger_material := ShaderMaterial.new()
