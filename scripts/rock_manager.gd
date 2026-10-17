@@ -123,6 +123,14 @@ func _physics_process(delta: float) -> void:
 			hit_ids[hazard.hazard_id] = true
 			invulnerability_remaining = Balance.ROCK_INVULNERABILITY_SECONDS
 			hit_count += 1
+			var hit_center := hazard.global_position
+			for center in hazard.collision_centers():
+				var previous_center := center + (hazard.previous_position - hazard.global_position)
+				if _segment_distance_to_origin(previous_center - previous_player_position, center - player.global_position) <= hazard.collision_radius() + ScaleLock.COLLIDER_WIDTH * 0.5:
+					hit_center = center
+					break
+			var hit_screen := hazard.get_global_transform_with_canvas() * hazard.to_local(hit_center)
+			hazard.last_hit = {"ticks_msec": Time.get_ticks_msec(), "center": {"x": hit_center.x, "y": hit_center.y}, "screen": {"x": hit_screen.x, "y": hit_screen.y}, "player": {"x": player.global_position.x, "y": player.global_position.y}}
 			player.apply_rock_hit(hazard.hazard_id)
 			game.on_rock_hit()
 	previous_player_position = player.global_position
