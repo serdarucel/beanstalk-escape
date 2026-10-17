@@ -201,4 +201,5 @@ func _apply_master_mute() -> void:
 
 func _set_paused(value: bool) -> void:
 	for player in [music, wind, sfx, heartbeat]:
-		player.stream_paused = value
+		if player.stream_paused != value:
+			player.stream_paused = value
