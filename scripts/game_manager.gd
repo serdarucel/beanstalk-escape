@@ -2,6 +2,7 @@ class_name GameManager
 extends Node2D
 
 const TIME_WINGS_ICON := preload("res://assets/art/character_rig/wing/time_wings.png")
+const DEAD_END_WARNING_ICON := preload("res://assets/art/gpt/items/warning_badge.png")
 const PET_FOLLOWER := preload("res://scripts/pet_follower.gd")
 const MODE_NORMAL := "NORMAL"
 const MODE_NIGHTMARE := "NIGHTMARE"
@@ -1722,6 +1723,16 @@ void fragment() {
 	wings_orb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	wings_orb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$HUD.add_child(wings_orb)
+	var dead_end_badge := TextureRect.new()
+	dead_end_badge.name = "DeadEndWarning"
+	dead_end_badge.texture = DEAD_END_WARNING_ICON
+	dead_end_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	dead_end_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	dead_end_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dead_end_badge.size = Vector2(64.0, 64.0)
+	dead_end_badge.z_index = 10
+	dead_end_badge.visible = false
+	$HUD.add_child(dead_end_badge)
 	var wings_bar := ProgressBar.new()
 	wings_bar.name = "TimeWingsBar"
 	wings_bar.max_value = Balance.TIME_WINGS_SECONDS
@@ -2270,7 +2281,43 @@ func _update_lives_hud() -> void:
 			heart.animate_loss()
 	displayed_lives = current_lives
 
+func _dead_end_warning_snapshot() -> Dictionary:
+	var route := player.active_branch
+	var distance := stages.next_dead_end_distance(player.global_position.y, player.global_position.x, route)
+	var stage_number := stages.stage_for_y(player.global_position.y)
+	# Keep the time lead across chunk boundaries; the stage query only sees its own chunk.
+	if stage_number >= 3 and is_inf(distance):
+		var next_y := stages.stage_bottom_y(stage_number + 1)
+		distance = player.global_position.y - next_y + stages.next_dead_end_distance(next_y, player.global_position.x, route)
+	var speed := player.climb_speed()
+	var seconds := distance / speed if speed > 0.0 else INF
+	var eligible := app_state == AppState.PLAYING and not tutorial_active and stage_number >= 3
+	return {
+		"visible": eligible and distance > 0.0 and speed > 0.0 and distance <= speed * Balance.DEAD_END_WARNING_SECONDS,
+		"route": route,
+		# -1 means there is no upcoming dead end (or no positive climb speed).
+		"distance_px": -1.0 if is_inf(distance) else distance,
+		"seconds_to_dead_end": -1.0 if is_inf(seconds) else seconds,
+	}
+
+func _update_dead_end_warning() -> void:
+	var warning := $HUD/DeadEndWarning as TextureRect
+	var info := _dead_end_warning_snapshot()
+	warning.visible = info.visible
+	if not warning.visible:
+		return
+	var end_y := player.global_position.y - float(info.distance_px)
+	var end_x := stages.branch_x_at(int(info.route), end_y) + ScaleLock.vine_visual_offset(int(info.route), end_y)
+	var screen_point := player.get_canvas_transform() * Vector2(end_x, end_y)
+	var hud_point := warning.get_canvas_transform().affine_inverse() * screen_point
+	var viewport_size := get_viewport_rect().size
+	warning.position = Vector2(
+		clampf(hud_point.x - warning.size.x * 0.5, 12.0, maxf(12.0, viewport_size.x - warning.size.x - 12.0)),
+		clampf(hud_point.y - warning.size.y - 16.0, 140.0, maxf(140.0, viewport_size.y - warning.size.y - 12.0))
+	)
+
 func _update_hud() -> void:
+	_update_dead_end_warning()
 	var playing := app_state == AppState.PLAYING
 	var normal_playing := playing and not tutorial_active
 	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0
@@ -2594,6 +2641,7 @@ func _readonly_state_snapshot() -> Dictionary:
 		"beans": state_beans,
 		"storm": storm.snapshot(),
 		"next_dead_end": {"route": dead_end_route, "distance_px": null if is_inf(dead_end_distance) else dead_end_distance},
+		"dead_end_warning": _dead_end_warning_snapshot(),
 		"open_routes_at_player": stages.open_routes_at(player.global_position.y),
 		"active_branch": player.active_branch,
 		"support_state": player.support_state_name(),

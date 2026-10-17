@@ -2,6 +2,8 @@ class_name Balance
 extends RefCounted
 
 const PLAYER_VERTICAL_SPEED := 125.0
+## StageDatabase.WARNING_LEAD / PLAYER_VERTICAL_SPEED: preserve the 1x lead time.
+const DEAD_END_WARNING_SECONDS := 2.88
 const PLAYER_HORIZONTAL_SPEED := 680.0
 const PLAYER_HORIZONTAL_ACCELERATION := 6000.0
 const BRANCH_TRANSITION_SECONDS := 0.40
