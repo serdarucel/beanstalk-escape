@@ -2585,6 +2585,9 @@ func _readonly_state_snapshot() -> Dictionary:
 		})
 	return {
 		"app_state": AppState.keys()[app_state],
+		"node_count": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"object_count": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		"static_memory_mb": Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
 		"run_time": total_time,
 		"score": int(score),
 		"run_coins": run_coins,
