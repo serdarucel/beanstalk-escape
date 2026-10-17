@@ -94,8 +94,9 @@ func _draw() -> void:
 
 func _draw_far_vines(top_y: float, sunset := 0.0) -> void:
 	for layer in 2:
-		var tint := Color("99d9df").lerp(Color("c8a5df") if layer == 0 else Color("ffc5a5"), sunset)
-		tint.a = 0.14 if layer == 0 else 0.19
+		# Muted hues stay darker than the sky; the farther layer lets more sky through.
+		var tint := Color("51a1b1").lerp(Color("937c8f"), sunset)
+		tint.a = 0.80 if layer == 0 else 0.95
 		var first_y := -278.0 + fposmod(-top_y * PARALLAX_SPEEDS[layer], FAR_TILE_HEIGHT) - FAR_TILE_HEIGHT
 		for tile in 2:
 			var destination := Rect2(-488.0, first_y + float(tile) * FAR_TILE_HEIGHT, 976.0, FAR_TILE_HEIGHT)
