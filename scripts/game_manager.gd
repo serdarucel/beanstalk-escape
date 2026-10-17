@@ -911,6 +911,15 @@ func _lose_life(cause: DeathCause, respawn_from_checkpoint: bool) -> bool:
 		_publish_readonly_web_state()
 	return true
 
+func _end_wings() -> void:
+	time_wings_remaining = 0.0
+	time_wings_started_remaining = 0.0
+	fire_wings_remaining = 0.0
+	fire_wings_started_remaining = 0.0
+	player.time_wings_active = false
+	player.remove_from_group("time_wings_active")
+	player.fire_wings_active = false
+
 func _enter_player_dead(cause: DeathCause) -> void:
 	economy.flush_climb_save()
 	golds.reset_combo()
@@ -924,10 +933,7 @@ func _enter_player_dead(cause: DeathCause) -> void:
 	death_count_by_stage[dead_stage] = int(death_count_by_stage.get(dead_stage, 0)) + 1
 	dead_restart_delay = 0.25
 	confirm_pending = false
-	player.time_wings_active = false
-	player.remove_from_group("time_wings_active")
-	player.fire_wings_active = false
-	fire_wings_remaining = 0.0
+	_end_wings()
 	player.set_physics_process(false)
 	spider.set_physics_process(false)
 	beans.set_physics_process(false)
@@ -999,6 +1005,7 @@ func _shop_from_death() -> void:
 
 func _respawn_at_continue_checkpoint() -> void:
 	golds.reset_combo()
+	_end_wings()
 	var safe_position: Vector2 = continue_checkpoint.get("position", player.global_position)
 	safe_position = _validated_continue_position(safe_position)
 	continue_checkpoint = {"position": safe_position, "stage": stages.stage_for_y(safe_position.y)}
