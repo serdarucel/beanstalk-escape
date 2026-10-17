@@ -1167,11 +1167,6 @@ func _show_shop() -> void:
 	meta_ui.open_shop()
 	_update_hud()
 
-func _show_map() -> void:
-	app_state = AppState.MAP
-	meta_ui.open_map()
-	_update_hud()
-
 func _show_character_select() -> void:
 	app_state = AppState.CHARACTER_SELECT
 	meta_ui.open_character_select()
@@ -1580,9 +1575,7 @@ void fragment() {
 	_add_label("Menu", Vector2(320, 300), "CHOOSE AN OPTION", 22)
 	_add_action_button("Resume", "RESUME", _resume_from_menu)
 	_add_action_button("NewRun", "NEW RUN", _start_selected_run)
-	_add_action_button("Nightmare", "NIGHTMARE", _start_nightmare_run)
 	_add_action_button("Shop", "SHOP", _show_shop)
-	_add_action_button("Map", "MAP", _show_map)
 	_add_action_button("HowToPlay", "HOW TO PLAY", _replay_tutorial)
 	_add_action_button("Credits", "CREDITS", _show_credits)
 	_build_daily_card()
@@ -1765,7 +1758,6 @@ void fragment() {
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		result_badges.append(badge)
 	_add_action_button("CompleteNewRun", "PLAY AGAIN", _complete_new_run)
-	_add_action_button("CompleteNightmare", "NIGHTMARE", _start_nightmare_run)
 	_add_action_button("CompleteMenu", "MENU", _complete_menu)
 	final_character = Sprite2D.new()
 	final_character.name = "FinalCharacter"
@@ -1954,9 +1946,7 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/Resume.size = Vector2(menu_width, menu_button_height)
 	if resume_available:
 		primary_y += menu_button_height + menu_gap
-	var primary_buttons: Array[Button] = [$HUD/NewRun, $HUD/Shop, $HUD/Map]
-	if bool(save_manager.replay_snapshot().nightmare_unlocked):
-		primary_buttons.append($HUD/Nightmare)
+	var primary_buttons: Array[Button] = [$HUD/NewRun, $HUD/Shop]
 	menu_width = minf(menu_width, (width - 32.0 - menu_gap * (primary_buttons.size() - 1)) / primary_buttons.size())
 	var menu_row_width := menu_width * primary_buttons.size() + menu_gap * (primary_buttons.size() - 1)
 	var menu_x := (width - menu_row_width) * 0.5
@@ -2019,14 +2009,12 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	for index in result_badges.size():
 		result_badges[index].position = Vector2(content_x + column_width + content_gap, content_top + 28.0 + index * badge_step)
 		result_badges[index].size = Vector2(column_width, 24.0 if compact else 32.0)
-	var complete_width := minf(190.0, (width - 48.0) / 3.0)
-	var complete_start := (width - complete_width * 3.0 - 12.0) * 0.5
+	var complete_width := minf(190.0, (width - 48.0) / 2.0)
+	var complete_start := (width - complete_width * 2.0 - 6.0) * 0.5
 	var complete_y := height - (60.0 if compact else 68.0)
 	$HUD/CompleteNewRun.position = Vector2(complete_start, complete_y)
 	$HUD/CompleteNewRun.size = Vector2(complete_width, 48.0 if compact else 52.0)
-	$HUD/CompleteNightmare.position = Vector2(complete_start + complete_width + 6.0, complete_y)
-	$HUD/CompleteNightmare.size = Vector2(complete_width, 48.0 if compact else 52.0)
-	$HUD/CompleteMenu.position = Vector2(complete_start + (complete_width + 6.0) * 2.0, complete_y)
+	$HUD/CompleteMenu.position = Vector2(complete_start + complete_width + 6.0, complete_y)
 	$HUD/CompleteMenu.size = Vector2(complete_width, 48.0 if compact else 52.0)
 	var touch_y := height - 148.0
 	$HUD/TouchLeft.position = Vector2(18.0, touch_y)
@@ -2344,16 +2332,13 @@ func _update_hud() -> void:
 	for badge in result_badges:
 		badge.visible = result_visible
 	$HUD/CompleteNewRun.visible = result_visible
-	$HUD/CompleteNightmare.visible = result_visible and bool(save_manager.replay_snapshot().nightmare_unlocked)
 	$HUD/CompleteMenu.visible = result_visible
 	player.visible = not result_visible
 	spider.visible = not result_visible
 	$HUD/MenuLogo.visible = app_state == AppState.MENU
 	$HUD/Resume.visible = app_state == AppState.MENU and resume_available
 	$HUD/NewRun.visible = app_state == AppState.MENU
-	$HUD/Nightmare.visible = app_state == AppState.MENU and bool(save_manager.replay_snapshot().nightmare_unlocked)
 	$HUD/Shop.visible = app_state == AppState.MENU
-	$HUD/Map.visible = app_state == AppState.MENU
 	$HUD/HowToPlay.visible = app_state == AppState.MENU
 	$HUD/Credits.visible = app_state == AppState.MENU
 	daily_card.visible = app_state == AppState.MENU
