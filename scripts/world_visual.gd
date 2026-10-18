@@ -79,8 +79,12 @@ var draw_mesh_cache: Array[ArrayMesh] = []
 var detail_vertices := PackedVector2Array()
 var detail_uvs := PackedVector2Array()
 var detail_indices := PackedInt32Array()
+var dead_end_texture: Texture2D
 
 func _ready() -> void:
+	var tip_path := "res://assets/art/eglence/obstacle_dead_end_tip.png"
+	if ResourceLoader.exists(tip_path):
+		dead_end_texture = load(tip_path) as Texture2D
 	var surface_shader := Shader.new()
 	surface_shader.code = SURFACE_SHADER
 	surface_material = ShaderMaterial.new()
@@ -93,6 +97,11 @@ func _ready() -> void:
 	sky_visual.z_index = -100
 	sky_visual.setup(player, stages)
 	add_child(sky_visual)
+	var sky_copy := BackBufferCopy.new()
+	sky_copy.name = "GapSkyBuffer"
+	sky_copy.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	sky_copy.z_index = -99
+	add_child(sky_copy)
 	cached_camera_top = _camera_top()
 	cached_visible_size = _visible_size()
 	queue_redraw()
@@ -338,9 +347,16 @@ func _draw_branch_ribbon(points: PackedVector2Array, route: int, cap_start: bool
 	# leaves the old square silhouette visible underneath.
 	if cap_start:
 		_taper_branch_endpoint(points, widths, true)
-	if cap_end:
+	var painted_dead_end := cap_end and not qa_support_mask and dead_end_texture != null and _is_dead_end_tip(route, points[points.size() - 1].y)
+	var ribbon_points := points.duplicate()
+	if painted_dead_end:
+		# Carry the full-width seam into the PNG, hiding the taper underneath it.
+		var direction := (points[points.size() - 1] - points[points.size() - 2]).normalized()
+		ribbon_points.append(points[points.size() - 1] + direction * 42.0)
+		widths.append(0.0)
+	elif cap_end:
 		_taper_branch_endpoint(points, widths, false)
-	_draw_textured_ribbon(points, widths)
+	_draw_textured_ribbon(ribbon_points, widths)
 	if cap_start and not qa_support_mask:
 		_draw_branch_tip_detail(points[0], (points[0] - points[1]).normalized(), route, true)
 	if cap_end and not qa_support_mask:
@@ -379,9 +395,28 @@ func _taper_branch_endpoint(points: PackedVector2Array, widths: PackedFloat32Arr
 		widths[index] = lerpf(2.0, widths[index], smooth)
 	widths[endpoint_index] = 2.0
 
-func _draw_branch_tip_detail(_base: Vector2, _direction: Vector2, _route: int, _is_restart: bool) -> void:
-	# The tapered ribbon owns its tip; no floating curl in the jump corridor.
-	pass
+func _is_dead_end_tip(route: int, world_y: float) -> bool:
+	if stages == null:
+		return false
+	# A closed support window starts a real dead end. Stage/cache clipping
+	# and the upper edge of the resident scene never qualify on their own.
+	var stage_number := stages.stage_for_y(world_y)
+	for number in range(maxi(stages.first_stage, stage_number - 1), mini(stages.last_stage, stage_number + 1) + 1):
+		for window: Dictionary in stages.pattern_for_stage(number).get("support_windows", []):
+			var endpoint := stages.stage_bottom_y(number) - float(window.start_progress) * stages.stage_length(number)
+			if not window.supports.has(route) and absf(endpoint - world_y) < 0.1:
+				return true
+	return false
+
+func _draw_branch_tip_detail(base: Vector2, direction: Vector2, route: int, is_restart: bool) -> void:
+	if is_restart or dead_end_texture == null or not _is_dead_end_tip(route, base.y):
+		return
+	var scale := _branch_painted_width(route, base.y) / 224.0
+	# The supplied lower seam lands on the actual support endpoint. Its solid
+	# body covers the retained taper, with the broken tip pointing uphill.
+	draw_set_transform(base, direction.angle() + PI * 0.5)
+	draw_texture_rect(dead_end_texture, Rect2(-Vector2(128, 506) * scale, dead_end_texture.get_size() * scale), false)
+	draw_set_transform(Vector2.ZERO)
 
 func _draw_outer_growth(cell: int, root: Vector2, side: float, size: float) -> void:
 	# Attach at the root's own Y, not the outermost point of the whole sprite.
