@@ -33,6 +33,10 @@ func measurements() -> Dictionary:
 	var pixel_scale := float(root.size.x) / viewport.x
 	var font_size := panel.get_theme_font_size("font_size")
 	var font_height := panel.get_theme_font("font").get_height(font_size)
+	var gesture := gesture_measurements(arrow, pixel_scale)
+	var clear_of_art := true
+	for rect in game._onboarding_blockers():
+		clear_of_art = clear_of_art and not arrow.get_rect().intersects(rect)
 	var hud_bottom := 0.0
 	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
 		var counter := game.get_node("HUD/" + key) as Control
@@ -41,11 +45,18 @@ func measurements() -> Dictionary:
 		"panel visible": panel.is_visible_in_tree(),
 		"text filled": not panel.text.strip_edges().is_empty(),
 		"arrow visible": arrow.is_visible_in_tree(),
+		"arrow thickness >=14 device px": gesture.stroke_px >= 14.0,
+		"hand height >=1.5 text heights": gesture.hand_px >= font_size * pixel_scale * 1.5,
+		"outline >=3 device px": arrow.border_width * pixel_scale >= 3.0,
+		"arrow head >=3 body widths": arrow_head_width(arrow) >= arrow.body_width * 3.0 - 0.01,
+		"gesture avoids coin obstacle player lane": clear_of_art,
+		"gesture inside screen": Rect2(Vector2.ZERO, viewport).encloses(arrow.get_rect()),
+		"gesture below panel": arrow.position.y >= panel.get_rect().end.y,
 		"font device px >=36": font_size * pixel_scale >= 36.0,
 		"panel inside screen": Rect2(Vector2.ZERO, viewport).encloses(panel.get_rect()),
 		"portrait width >=80%": viewport.x > viewport.y or panel.size.x >= viewport.x * 0.8,
 		"text not clipped": panel.get_visible_line_count() >= panel.get_line_count(),
-		"arrow length >=2 text heights": arrow.size.y - 20.0 >= font_height * 2.0 - 0.01,
+		"arrow length >=2 text heights": arrow.path_length >= font_height * 2.0 - 0.01,
 		"arrow upper half": arrow.position.y + arrow.size.y <= viewport.y * 0.5,
 		"skip <=120x36": skip.size.x <= 120.0 and skip.size.y <= 36.0,
 		"skip outside panel": not skip.get_rect().intersects(panel.get_rect()),
@@ -55,9 +66,27 @@ func measurements() -> Dictionary:
 		"skip touch target >=44": skip._has_point(Vector2(1, -5.9)) and skip._has_point(Vector2(1, 37.9)),
 	}
 
+func arrow_head_width(arrow: Control) -> float:
+	var points: PackedVector2Array = arrow.arrow_points()
+	return points[2].distance_to(points[4])
+
+func gesture_measurements(arrow: Control, pixel_scale: float) -> Dictionary:
+	if not arrow.has_method("hand_points"):
+		return {"stroke_px": 0.0, "hand_px": 0.0}
+	var points: PackedVector2Array = arrow.hand_points()
+	var bounds := Rect2(points[0], Vector2.ZERO)
+	for point in points:
+		bounds = bounds.expand(point)
+	var shaft: PackedVector2Array = arrow.arrow_points()
+	return {"stroke_px": shaft[1].distance_to(shaft[5]) * pixel_scale, "hand_px": bounds.size.y * pixel_scale}
+
 func sample(label: String) -> void:
 	var panel := game.get_node("HUD/TutorialPanel") as Label
 	var skip := game.get_node("HUD/TutorialSkip") as Button
+	var arrow := game.get_node("HUD/TutorialArrow") as Control
+	var scale := float(root.size.x) / game.get_viewport_rect().size.x
+	var gesture := gesture_measurements(arrow, scale)
+	print("RAW K1b stroke_px=%.2f hand_px=%.2f head_px=%.2f border_px=%.2f gesture=%s" % [gesture.stroke_px, gesture.hand_px, arrow_head_width(arrow) * scale, arrow.border_width * scale, arrow.get_rect()])
 	print("RAW %s window=%s viewport=%s text=%s font_px=%.2f panel=%s skip=%s" % [label, root.size, game.get_viewport_rect().size, panel.text.replace("\n", " / "), panel.get_theme_font_size("font_size") * float(root.size.x) / game.get_viewport_rect().size.x, panel.get_rect(), skip.get_rect()])
 	var values := measurements()
 	for key in values:
@@ -83,6 +112,25 @@ func negative_controls() -> void:
 	arrow.hide()
 	reject("arrow visible")
 	arrow.show()
+	if arrow.has_method("hand_points"):
+		var body_width: float = arrow.body_width
+		arrow.body_width = 1.0
+		reject("arrow thickness >=14 device px")
+		arrow.body_width = body_width
+		var hand_height: float = arrow.hand_height
+		arrow.hand_height = 1.0
+		reject("hand height >=1.5 text heights")
+		arrow.hand_height = hand_height
+		var border_width: float = arrow.border_width
+		arrow.border_width = 1.0
+		reject("outline >=3 device px")
+		arrow.border_width = border_width
+		var gesture_position := arrow.position
+		var blockers := game._onboarding_blockers()
+		check("collision control has real artwork", not blockers.is_empty())
+		arrow.position = blockers[0].position
+		reject("gesture avoids coin obstacle player lane")
+		arrow.position = gesture_position
 	var font_size := panel.get_theme_font_size("font_size")
 	panel.add_theme_font_size_override("font_size", 1)
 	reject("font device px >=36")
@@ -101,10 +149,10 @@ func negative_controls() -> void:
 	reject("text not clipped")
 	panel.max_lines_visible = -1
 	panel.text = text
-	var arrow_size := arrow.size
-	arrow.size.y = 1.0
+	var arrow_length: float = arrow.path_length
+	arrow.path_length = 1.0
 	reject("arrow length >=2 text heights")
-	arrow.size = arrow_size
+	arrow.path_length = arrow_length
 	var arrow_position := arrow.position
 	arrow.position.y = game.get_viewport_rect().size.y
 	reject("arrow upper half")
