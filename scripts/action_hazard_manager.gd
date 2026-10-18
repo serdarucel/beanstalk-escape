@@ -191,7 +191,7 @@ class ActionHazard extends Node2D:
 		var pixel := screen_pixel()
 		for layer in [3.2, 2.1]:
 			for index in 16:
-				var offset := Vector2.from_angle(TAU * float(index) / 16.0) * layer * pixel
+				var offset: Vector2 = Vector2.from_angle(TAU * float(index) / 16.0) * layer * pixel
 				draw_texture_rect(mask, Rect2(rect.position + offset, rect.size), false, HALO if layer == 3.2 else OUTLINE)
 		draw_texture_rect(source, rect, false)
 
