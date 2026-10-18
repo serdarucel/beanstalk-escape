@@ -1,6 +1,14 @@
 extends ColorRect
 
-# The single danger frame. GameManager owns its visibility and fade alpha.
+# The single danger frame. GameManager owns the fade alpha and danger lifecycle.
+@onready var game: GameManager = get_parent().get_parent() as GameManager
+
+func _process(_delta: float) -> void:
+	# Physics children can move after the manager's HUD update. Check the actual
+	# rendered frame's distance too, especially during retreat or a respawn.
+	visible = game.app_state == GameManager.AppState.PLAYING and not game.tutorial_active and game.danger_vignette_alpha > 0.0 and game.spider.distance_to_player() <= GameManager.DANGER_FRAME_MAX_GAP
+	modulate.a = game.danger_vignette_alpha
+
 func _ready() -> void:
 	var danger_shader := Shader.new()
 	danger_shader.code = """shader_type canvas_item;

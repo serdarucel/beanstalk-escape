@@ -166,6 +166,7 @@ const DANGER_VIGNETTE_ALPHA := 0.875
 const DANGER_FADE_IN_SECONDS := 0.15
 const DANGER_FADE_OUT_SECONDS := 0.30
 const DANGER_MIN_CLOSED_SECONDS := 1.0
+const DANGER_FRAME_MAX_GAP := 120.0
 var displayed_lives := -1
 var ad_revives_by_stage := {}
 var completed_since_interstitial := 0
@@ -977,7 +978,7 @@ func _lose_life(cause: DeathCause, respawn_from_checkpoint: bool) -> bool:
 		return false
 	current_lives -= 1
 	golds.reset_combo()
-	_end_danger()
+	_end_danger(true)
 	damage_events += 1
 	challenge_eligible = false
 	hit_invulnerability_remaining = float(economy.config.get("hit_invulnerability_seconds", 1.5))
@@ -1085,6 +1086,8 @@ func _shop_from_death() -> void:
 		_show_shop()
 
 func _respawn_at_continue_checkpoint() -> void:
+	# Immune falls bypass _lose_life: cancel before reset_run drops tracking.
+	_end_danger(true)
 	golds.reset_combo()
 	_end_wings()
 	var safe_position: Vector2 = continue_checkpoint.get("position", player.global_position)
@@ -1659,11 +1662,20 @@ func _begin_danger(immediate := false) -> void:
 		return
 	spider.begin_danger(immediate)
 
-func _end_danger() -> void:
-	if danger_remaining <= 0.0:
-		return
+func _end_danger(clear_frame := false) -> void:
+	var was_active := danger_remaining > 0.0
 	danger_remaining = 0.0
-	spider.retreat_from_danger(_spider_start_gap(stages.stage_for_y(player.global_position.y)))
+	if was_active:
+		spider.retreat_from_danger(_spider_start_gap(stages.stage_for_y(player.global_position.y)))
+	if clear_frame:
+		_clear_danger_frame()
+
+func _clear_danger_frame() -> void:
+	danger_vignette_alpha = 0.0
+	danger_vignette_closing = false
+	danger_vignette_closed_remaining = DANGER_MIN_CLOSED_SECONDS
+	danger_vignette.visible = false
+	danger_vignette.modulate.a = 0.0
 
 func _update_danger(delta: float) -> void:
 	if app_state != AppState.PLAYING or tutorial_active:
@@ -1673,7 +1685,9 @@ func _update_danger(delta: float) -> void:
 			_end_danger()
 		else:
 			danger_remaining -= delta
-	var in_danger := danger_remaining > 0.0 or spider.distance_to_player() <= SPIDER_RED_ZONE_PX
+	var gap := spider.distance_to_player()
+	# A timer alone cannot show the frame while the spider is approaching.
+	var in_danger := danger_remaining > 0.0 and gap <= SPIDER_RED_ZONE_PX
 	if not in_danger and danger_vignette_alpha > 0.0:
 		danger_vignette_closing = true
 	if danger_vignette_closing:
@@ -2531,7 +2545,7 @@ func _update_hud() -> void:
 	_pump_text_messages()
 	var playing := app_state == AppState.PLAYING
 	var normal_playing := playing and not tutorial_active
-	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0
+	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0 and spider.distance_to_player() <= DANGER_FRAME_MAX_GAP
 	danger_vignette.modulate.a = danger_vignette_alpha
 	var result_visible := app_state == AppState.GAME_COMPLETE
 	var meta_visible := normal_playing or result_visible
