@@ -1849,16 +1849,20 @@ func _begin_danger(immediate := false) -> void:
 	if tutorial_active:
 		return
 	spider.begin_danger(immediate)
+	# Only a new stumble can arm this frame; reaching the near gap consumes it.
+	danger_vignette.set_meta("approaching", spider.distance_to_player() > Balance.DANGER_GAP + 0.001)
 
 func _end_danger(clear_frame := false) -> void:
 	var was_active := danger_remaining > 0.0
 	danger_remaining = 0.0
+	danger_vignette.set_meta("approaching", false)
 	if was_active:
 		spider.retreat_from_danger(_spider_start_gap(stages.stage_for_y(player.global_position.y)))
 	if clear_frame:
 		_clear_danger_frame()
 
 func _clear_danger_frame() -> void:
+	danger_vignette.set_meta("approaching", false)
 	danger_vignette_alpha = 0.0
 	danger_vignette_closing = false
 	danger_vignette_closed_remaining = DANGER_MIN_CLOSED_SECONDS
@@ -1874,8 +1878,9 @@ func _update_danger(delta: float) -> void:
 		else:
 			danger_remaining -= delta
 	var gap := spider.distance_to_player()
-	# A timer alone cannot show the frame while the spider is approaching.
-	var in_danger := danger_remaining > 0.0 and gap <= SPIDER_RED_ZONE_PX
+	if gap <= Balance.DANGER_GAP + 0.001:
+		danger_vignette.set_meta("approaching", false)
+	var in_danger := danger_remaining > 0.0 and bool(danger_vignette.get_meta("approaching", false))
 	if not in_danger and danger_vignette_alpha > 0.0:
 		danger_vignette_closing = true
 	if danger_vignette_closing:
@@ -2798,7 +2803,7 @@ func _update_hud() -> void:
 	_pump_text_messages()
 	var playing := app_state == AppState.PLAYING
 	var normal_playing := playing
-	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0 and spider.distance_to_player() <= DANGER_FRAME_MAX_GAP
+	danger_vignette.visible = normal_playing and not tutorial_active and danger_remaining > 0.0 and danger_vignette_alpha > 0.0
 	danger_vignette.modulate.a = danger_vignette_alpha
 	var result_visible := app_state == AppState.GAME_COMPLETE
 	var meta_visible := normal_playing or result_visible
