@@ -15,6 +15,7 @@ const FRAMES := [
 # Reveal the smaller visual at the lower edge without moving the gameplay body.
 const VISUAL_SCALE := 1.0
 const EDGE_REVEAL_PX := 112.0
+const MIN_EDGE_PLAYER_GAP_PX := 130.0
 const BASE_POSITION := Vector2(0, -8)
 const FRAME_ALPHA_TOP := [31.0, 43.0, 31.0, 40.0, 24.0, 37.0, 33.0, 40.0]
 const FRAME_ALPHA_BOTTOM := 144.0
@@ -96,14 +97,23 @@ func _apply_bottom_edge_framing() -> void:
 	sprite.position = BASE_POSITION
 	if sprite.texture == null or not is_inside_tree():
 		return
+	var body_transform := get_global_transform_with_canvas()
+	var screen_origin := body_transform * Vector2.ZERO
+	var viewport_rect := get_viewport_rect()
+	# Preserve actual gameplay spacing whenever the spider's origin is on screen.
+	if viewport_rect.has_point(screen_origin) or screen_origin.y < viewport_rect.end.y:
+		return
 	var texture_height := float(sprite.texture.get_height())
 	var safe_top_local := SAFE_ALPHA_TOP - texture_height * 0.5
 	var screen_top := (sprite.get_global_transform_with_canvas() * Vector2(0.0, safe_top_local)).y
-	var body_transform := get_global_transform_with_canvas()
-	var screen_origin := body_transform * Vector2.ZERO
 	var screen_unit_y := body_transform * Vector2.DOWN
 	var pixels_per_world_unit := maxf((screen_unit_y - screen_origin).length(), 0.001)
-	var desired_top := get_viewport_rect().size.y - EDGE_REVEAL_PX * pixels_per_world_unit
-	if screen_top <= desired_top:
+	var sprite_screen_y := sprite.get_global_transform_with_canvas().origin.y
+	var desired_screen_y := viewport_rect.end.y - EDGE_REVEAL_PX + sprite_screen_y - screen_top
+	var spider := get_parent() as SpiderController
+	if spider != null and spider.player != null:
+		var player_screen_y := spider.player.get_global_transform_with_canvas().origin.y
+		desired_screen_y = maxf(desired_screen_y, player_screen_y + MIN_EDGE_PLAYER_GAP_PX)
+	if sprite_screen_y <= desired_screen_y:
 		return
-	sprite.position.y -= (screen_top - desired_top) / pixels_per_world_unit
+	sprite.position.y -= (sprite_screen_y - desired_screen_y) / pixels_per_world_unit

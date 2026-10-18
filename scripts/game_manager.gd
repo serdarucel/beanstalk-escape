@@ -108,7 +108,6 @@ var close_calls := 0
 var danger_was_active := false
 var shake_remaining := 0.0
 var close_text_remaining := 0.0
-var danger_pulse_remaining := 0.0
 var skills_used := 0
 var best_spider_distance := 0.0
 var time_wings_remaining := 0.0
@@ -161,7 +160,12 @@ var hit_invulnerability_remaining := 0.0
 var danger_remaining := 0.0
 var danger_vignette: ColorRect
 var danger_vignette_alpha := 0.0
-var danger_pulse_elapsed := 0.0
+var danger_vignette_closing := false
+var danger_vignette_closed_remaining := 0.0
+const DANGER_VIGNETTE_ALPHA := 0.875
+const DANGER_FADE_IN_SECONDS := 0.15
+const DANGER_FADE_OUT_SECONDS := 0.30
+const DANGER_MIN_CLOSED_SECONDS := 1.0
 var displayed_lives := -1
 var ad_revives_by_stage := {}
 var completed_since_interstitial := 0
@@ -174,7 +178,8 @@ var spider_red_zone_seen := false
 var completed_stages := {}
 var completion_committed := false
 const INTRO_BEAT_SECONDS := [2.3, 3.0, 2.3]
-const CAMERA_PLAY_POSITION := Vector2(0.0, -120.0)
+const CAMERA_PLAYER_HEIGHT_RATIO := 0.62
+var camera_play_position := Vector2.ZERO
 const INTRO_LOOK_UP_POSITION := Vector2(0.0, -210.0)
 const INTRO_GUARDIAN_SCALE := Vector2.ONE * 1.35
 const INTRO_VISUAL_MODES := ["climb", "summit", "guardian"]
@@ -300,7 +305,6 @@ func _physics_process(delta: float) -> void:
 		_update_ghost(delta)
 	shake_remaining = maxf(shake_remaining - delta, 0.0)
 	close_text_remaining = maxf(close_text_remaining - delta, 0.0)
-	danger_pulse_remaining = maxf(danger_pulse_remaining - delta, 0.0)
 	_apply_impact_fx(delta)
 	if time_wings_remaining > 0.0:
 		time_wings_remaining = maxf(time_wings_remaining - delta, 0.0)
@@ -320,7 +324,6 @@ func _physics_process(delta: float) -> void:
 	best_spider_distance = maxf(best_spider_distance, gauge.distance_px)
 	if gauge.level == "DANGER" and not danger_was_active:
 		danger_was_active = true
-		danger_pulse_remaining = 0.22
 	elif gauge.level != "DANGER" and danger_was_active:
 		close_calls += 1
 		close_text_remaining = 0.60
@@ -518,7 +521,9 @@ func restart() -> void:
 	danger_was_active = false
 	shake_remaining = 0.0
 	close_text_remaining = 0.0
-	danger_pulse_remaining = 0.0
+	danger_vignette_alpha = 0.0
+	danger_vignette_closing = false
+	danger_vignette_closed_remaining = 0.0
 	_apply_impact_fx(0.0)
 	skills_used = 0
 	best_spider_distance = 0.0
@@ -576,7 +581,7 @@ func _begin_intro() -> void:
 	golds.visible = false
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
-		camera.position = CAMERA_PLAY_POSITION
+		camera.position = camera_play_position
 		camera.offset = Vector2.ZERO
 	var spider_body := spider.get_node_or_null("Body") as CanvasItem
 	if spider_body != null:
@@ -593,9 +598,9 @@ func _update_intro(delta: float) -> void:
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
 		if intro_beat == 0:
-			camera.position = CAMERA_PLAY_POSITION.lerp(INTRO_LOOK_UP_POSITION, progress * progress * (3.0 - 2.0 * progress))
+			camera.position = camera_play_position.lerp(INTRO_LOOK_UP_POSITION, progress * progress * (3.0 - 2.0 * progress))
 		elif intro_beat == 2:
-			camera.position = CAMERA_PLAY_POSITION
+			camera.position = camera_play_position
 			if intro_t < 0.34:
 				var shake_strength := 9.0 * (1.0 - intro_t / 0.34)
 				camera.offset = Vector2.from_angle(intro_t * TAU * 18.0) * shake_strength
@@ -633,7 +638,7 @@ func _update_intro_presentation() -> void:
 	if intro_beat == 2:
 		var camera := player.get_node_or_null("Camera2D") as Camera2D
 		if camera != null:
-			camera.position = CAMERA_PLAY_POSITION
+			camera.position = camera_play_position
 		_layout_intro_text(get_viewport_rect().size)
 		audio.play_sfx("spider_scream")
 
@@ -665,7 +670,7 @@ func _finish_intro() -> void:
 	golds.visible = true
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
-		camera.position = CAMERA_PLAY_POSITION
+		camera.position = camera_play_position
 		camera.offset = Vector2.ZERO
 	var spider_body := spider.get_node_or_null("Body") as CanvasItem
 	if spider_body != null:
@@ -708,7 +713,9 @@ func restart_stage() -> void:
 	storm.reset_run()
 	shake_remaining = 0.0
 	close_text_remaining = 0.0
-	danger_pulse_remaining = 0.0
+	danger_vignette_alpha = 0.0
+	danger_vignette_closing = false
+	danger_vignette_closed_remaining = 0.0
 	_apply_impact_fx(0.0)
 	player.reset_run(Vector2(0, start_y))
 	climb_previous_y = player.global_position.y
@@ -1579,7 +1586,6 @@ func _begin_danger(immediate := false) -> void:
 	danger_remaining = 0.0 if tutorial_active else Balance.DANGER_SECONDS
 	if tutorial_active:
 		return
-	danger_pulse_elapsed = 0.0
 	spider.begin_danger(immediate)
 
 func _end_danger() -> void:
@@ -1596,10 +1602,20 @@ func _update_danger(delta: float) -> void:
 			_end_danger()
 		else:
 			danger_remaining -= delta
-		danger_pulse_elapsed += delta
-		danger_vignette_alpha = 0.875 + 0.075 * cos(danger_pulse_elapsed * TAU / 0.5)
-	else:
-		danger_vignette_alpha = move_toward(danger_vignette_alpha, 0.0, delta / 0.3)
+	var in_danger := danger_remaining > 0.0 or spider.distance_to_player() <= SPIDER_RED_ZONE_PX
+	if not in_danger and danger_vignette_alpha > 0.0:
+		danger_vignette_closing = true
+	if danger_vignette_closing:
+		# Finish closing before accepting another opening, even if danger returns.
+		danger_vignette_alpha = move_toward(danger_vignette_alpha, 0.0, delta * DANGER_VIGNETTE_ALPHA / DANGER_FADE_OUT_SECONDS)
+		if danger_vignette_alpha <= 0.000001:
+			danger_vignette_alpha = 0.0
+			danger_vignette_closing = false
+			danger_vignette_closed_remaining = DANGER_MIN_CLOSED_SECONDS
+	elif danger_vignette_closed_remaining > 0.0:
+		danger_vignette_closed_remaining = maxf(danger_vignette_closed_remaining - delta, 0.0)
+	elif in_danger:
+		danger_vignette_alpha = move_toward(danger_vignette_alpha, DANGER_VIGNETTE_ALPHA, delta * DANGER_VIGNETTE_ALPHA / DANGER_FADE_IN_SECONDS)
 
 func on_environment_hit(kind: String, respawn_from_checkpoint := false) -> void:
 	var cause := DeathCause.FALL if kind == "branch_break" else DeathCause.OBSTACLE
@@ -1629,19 +1645,7 @@ func _setup_hud() -> void:
 	danger_vignette.name = "DangerVignette"
 	danger_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	danger_vignette.z_index = 20
-	var danger_shader := Shader.new()
-	danger_shader.code = """shader_type canvas_item;
-render_mode unshaded;
-void fragment() {
-    // Screen pixel size tracks viewport resizing and portrait orientation.
-    vec2 edge_distance = min(SCREEN_UV, vec2(1.0) - SCREEN_UV) / SCREEN_PIXEL_SIZE;
-    float edge = clamp((28.0 - min(edge_distance.x, edge_distance.y)) / 18.0, 0.0, 1.0);
-    COLOR = vec4(0.85, 0.02, 0.03, edge * COLOR.a);
-}
-"""
-	var danger_material := ShaderMaterial.new()
-	danger_material.shader = danger_shader
-	danger_vignette.material = danger_material
+	danger_vignette.set_script(preload("res://scripts/danger_overlay.gd"))
 	$HUD.add_child(danger_vignette)
 	danger_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	danger_vignette.visible = false
@@ -1856,13 +1860,6 @@ void fragment() {
 	mini.size = Vector2(48, 360)
 	$HUD.add_child(mini)
 	mini.game = self
-	var danger_overlay := Control.new()
-	danger_overlay.name = "DangerOverlay"
-	danger_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	danger_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	danger_overlay.set_script(load("res://scripts/danger_overlay.gd"))
-	$HUD.add_child(danger_overlay)
-	danger_overlay.game = self
 	_add_mute_button()
 	_add_touch_button("TouchWings", Rect2(880, 386, 64, 64), "TIME", "time_wings")
 	_add_touch_button("TouchFire", Rect2(880, 460, 64, 64), "FIRE", "fire_wings")
@@ -1938,6 +1935,14 @@ func _claim_daily_bonus() -> void:
 	_refresh_daily_card()
 
 func layout_hud_for_viewport(viewport_size: Vector2) -> void:
+	camera_play_position = Vector2(0.0, viewport_size.y * (0.5 - CAMERA_PLAYER_HEIGHT_RATIO))
+	var camera := player.get_node_or_null("Camera2D") as Camera2D
+	if camera != null:
+		if intro_active and intro_beat == 0:
+			var progress := clampf(intro_t / float(INTRO_BEAT_SECONDS[0]), 0.0, 1.0)
+			camera.position = camera_play_position.lerp(INTRO_LOOK_UP_POSITION, smoothstep(0.0, 1.0, progress))
+		elif not intro_active or intro_beat == 2:
+			camera.position = camera_play_position
 	var width := maxf(viewport_size.x, 320.0)
 	var height := maxf(viewport_size.y, 320.0)
 	var portrait := width < height
