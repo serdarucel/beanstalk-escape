@@ -18,6 +18,12 @@ var bean_penalty_count := 0
 var vertical_blocked := false
 var time_wings_active := false
 var fire_wings_active := false
+var flying := false
+var flight_remaining := 0.0
+var flight_total := 8.0
+var flight_lane_elapsed := 0.2
+var flight_lane_start_x := 0.0
+var flight_height := 0.0
 var speed_scale := 1.0
 var rock_penalty_count := 0
 var knockback_speed := Balance.BEAN_KNOCKBACK_SPEED
@@ -63,6 +69,9 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 func _update_movement(delta: float) -> void:
+	if flying:
+		_update_flight(delta)
+		return
 	knockback_remaining = maxf(knockback_remaining - delta, 0.0)
 	if knockback_remaining <= 0.0:
 		rock_knockback_requires_support = false
@@ -98,13 +107,13 @@ func _update_movement(delta: float) -> void:
 	_update_vine_visual_offset()
 
 func request_jump() -> bool:
-	if action_state == ActionState.AIRBORNE or knockback_remaining > 0.0 or stun_remaining > 0.0:
+	if flying or action_state == ActionState.AIRBORNE or knockback_remaining > 0.0 or stun_remaining > 0.0:
 		return false
 	_start_action(ActionState.AIRBORNE, maxf(Balance.JUMP_AIR_SECONDS_MIN, Balance.JUMP_AIR_SECONDS_BASE / sqrt(maxf(speed_scale, 0.00001))))
 	return true
 
 func request_hug() -> bool:
-	if knockback_remaining > 0.0 or stun_remaining > 0.0:
+	if flying or knockback_remaining > 0.0 or stun_remaining > 0.0:
 		return false
 	_start_action(ActionState.HUG, Balance.HUG_SECONDS)
 	return true
@@ -145,7 +154,9 @@ func _remove_action_visual() -> void:
 func _apply_action_visual() -> void:
 	if body == null:
 		return
-	if is_airborne():
+	if flying:
+		_action_visual_scale = lerpf(1.0, 1.2, flight_height / 70.0)
+	elif is_airborne():
 		var progress := 1.0 - action_remaining / action_total
 		_action_visual_scale = lerpf(1.0, Balance.JUMP_VISUAL_SCALE, sin(PI * progress))
 	elif is_hugging():
@@ -264,6 +275,8 @@ func _update_branch_movement(delta: float) -> void:
 	_begin_branch_transition(requested_direction)
 
 func request_branch_direction(direction: int) -> bool:
+	if flying:
+		return _request_flight_lane(direction)
 	if (direction == -1 or direction == 1) and _pending_branch_direction == 0 and stages != null and stages.stage_for_y(global_position.y) >= 3 and movement_mode == MovementMode.ATTACHED:
 		_pending_branch_direction = direction
 		return true
@@ -352,6 +365,11 @@ func _update_falling_recovery(delta: float) -> void:
 
 func reset_run(at_position: Vector2) -> void:
 	cancel_action()
+	if flying:
+		flying = false
+		flight_remaining = 0.0
+		flight_height = 0.0
+		get_parent().end_wing_flight()
 	global_position = at_position
 	velocity = Vector2.ZERO
 	knockback_remaining = 0.0
@@ -383,6 +401,8 @@ func reset_run(at_position: Vector2) -> void:
 	_reset_visual_pose()
 
 func apply_bean_hit() -> void:
+	if flying or float(get_parent().hit_invulnerability_remaining) > 0.0:
+		return
 	cancel_action()
 	bean_penalty_count += 1
 	rock_knockback_requires_support = false
@@ -393,6 +413,8 @@ func apply_bean_hit() -> void:
 	knockback_speed = Balance.BEAN_KNOCKBACK_SPEED
 
 func apply_rock_hit(_hit_id: String) -> void:
+	if flying or float(get_parent().hit_invulnerability_remaining) > 0.0:
+		return
 	cancel_action()
 	rock_penalty_count += 1
 	rock_knockback_requires_support = movement_mode == MovementMode.ATTACHED and support_state == SupportState.SUPPORTED
@@ -403,7 +425,103 @@ func apply_rock_hit(_hit_id: String) -> void:
 	knockback_speed = Balance.ROCK_KNOCKBACK_SPEED
 
 func climb_speed() -> float:
-	return Balance.PLAYER_VERTICAL_SPEED * speed_scale * (Balance.FIRE_WINGS_SPEED_SCALE if fire_wings_active else 1.0)
+	return Balance.PLAYER_VERTICAL_SPEED * speed_scale * (1.5 if flying else 1.0)
+
+func is_flying() -> bool:
+	return flying
+
+func start_wing_flight(seconds: float) -> void:
+	cancel_action()
+	flying = true
+	flight_total = seconds
+	flight_remaining = seconds
+	flight_lane_elapsed = 0.2
+	flight_lane_start_x = global_position.x
+	knockback_remaining = 0.0
+	stun_remaining = 0.0
+	rock_knockback_requires_support = false
+	_pending_branch_direction = 0
+	time_wings_active = false
+	remove_from_group("time_wings_active")
+	fire_wings_active = true
+	movement_mode = MovementMode.ATTACHED
+	support_state = SupportState.TRANSFERRING
+	on_support = false
+	transition_from = active_branch
+	transition_to = active_branch
+	get_parent().begin_wing_flight()
+
+func _request_flight_lane(direction: int) -> bool:
+	if absi(direction) != 1 or flight_remaining <= 0.4:
+		return false
+	var target := active_branch + direction
+	if target < 0 or target > 2:
+		return false
+	transition_from = active_branch
+	transition_to = target
+	active_branch = target
+	flight_lane_start_x = global_position.x
+	flight_lane_elapsed = 0.0
+	return true
+
+func _nearest_flight_support(world_y: float) -> int:
+	stages.ensure_stage(stages.stage_for_y(world_y))
+	var nearest := -1
+	var distance := INF
+	for lane in 3:
+		if not branch_graph.has_support(stages, lane, world_y):
+			continue
+		var dx := absf(stages.branch_x_at(lane, world_y) - global_position.x)
+		if dx < distance:
+			distance = dx
+			nearest = lane
+	return nearest
+
+func _update_flight(delta: float) -> void:
+	flight_remaining = maxf(flight_remaining - delta, 0.0)
+	if flight_remaining < 0.00001:
+		flight_remaining = 0.0
+	velocity = Vector2(0.0, -climb_speed())
+	global_position.y += velocity.y * delta
+	vertical_blocked = false
+	var left := Input.is_action_just_pressed("move_left")
+	var right := Input.is_action_just_pressed("move_right")
+	# The dispatch path may already have consumed this key edge.
+	if flight_lane_elapsed >= 0.2 and left != right:
+		_request_flight_lane(-1 if left else 1)
+	if flight_remaining <= 0.4:
+		var nearest := _nearest_flight_support(global_position.y)
+		if nearest >= 0 and nearest != active_branch:
+			active_branch = nearest
+			flight_lane_start_x = global_position.x
+			flight_lane_elapsed = 0.0
+	flight_lane_elapsed = minf(flight_lane_elapsed + delta, 0.2)
+	global_position.x = lerpf(flight_lane_start_x, stages.branch_x_at(active_branch, global_position.y), smoothstep(0.0, 1.0, flight_lane_elapsed / 0.2))
+	flight_height = 70.0 * minf(clampf((flight_total - flight_remaining) / 0.4, 0.0, 1.0), clampf(flight_remaining / 0.4, 0.0, 1.0))
+	if body != null:
+		body.position = Vector2(ScaleLock.vine_visual_offset(active_branch, global_position.y), -flight_height)
+		body.rotation = 0.0
+	if flight_remaining > 0.0:
+		return
+	var landing_lane := _nearest_flight_support(global_position.y)
+	if landing_lane < 0:
+		return # Remain protected until there is real support to land on.
+	flying = false
+	fire_wings_active = false
+	active_branch = landing_lane
+	transition_from = landing_lane
+	transition_to = landing_lane
+	transition_progress = 0.0
+	_pending_branch_direction = 0
+	support_offset = 0.0
+	support_offset_velocity = 0.0
+	movement_mode = MovementMode.ATTACHED
+	support_state = SupportState.SUPPORTED
+	on_support = true
+	_last_stage = stages.stage_for_y(global_position.y)
+	global_position.x = stages.branch_x_at(landing_lane, global_position.y)
+	_reset_visual_pose()
+	get_parent().end_wing_flight()
 
 func branch_transition_seconds() -> float:
 	return Balance.BRANCH_TRANSITION_SECONDS * (1.0 - 0.5 * (speed_scale - 1.0) * 2.0 / 3.0)

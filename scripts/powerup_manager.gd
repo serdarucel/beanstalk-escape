@@ -4,6 +4,7 @@ extends Node2D
 var types: Dictionary = {
 	"MAGNET": {"id": "MAGNET", "duration": 10.0, "color": Color("68e58b"), "label": "MAGNET LEAF"},
 	"DOUBLE": {"id": "DOUBLE", "duration": 10.0, "color": Color("ffd260"), "label": "GOLDEN BEAN ×2"},
+	"WINGS": {"id": "WINGS", "duration": 8.0, "color": Color("ffab62"), "label": "WING FLIGHT"},
 }
 var active: Dictionary = {}
 var items: Array[Dictionary] = []
@@ -17,6 +18,8 @@ var rng := RandomNumberGenerator.new()
 var previous_type := ""
 var textures: Dictionary = {}
 var visual_time := 0.0
+var flight_serial := 0
+var air_coins: Array[GoldCollectible] = []
 
 func setup(target: PlayerController, stage_manager: StageManager, manager: GameManager) -> void:
 	player = target
@@ -37,8 +40,15 @@ func register_type(id: String, data: Dictionary) -> void:
 	var path := "res://assets/art/eglence/powerup_%s.png" % id.to_lower()
 	if ResourceLoader.exists(path):
 		textures[id] = load(path)
+	elif id == "WINGS":
+		# Fire Wings is an atlas region in PlayerVisual, not a separate rig PNG.
+		var wing := AtlasTexture.new()
+		wing.atlas = PlayerVisual.ROCK_FIRE_ATLAS
+		wing.region = Rect2(Vector2(1024, 512), PlayerVisual.FIRE_WINGS_REGION_SIZE)
+		textures[id] = wing
 
 func reset_run() -> void:
+	clear_air_coins()
 	active.clear()
 	items.clear()
 	spawned = 0
@@ -56,6 +66,32 @@ func is_active(id: String) -> bool:
 func activate(id: String) -> void:
 	if types.has(id):
 		active[id] = float(types[id].duration)
+		if id == "WINGS" and player != null:
+			player.start_wing_flight(float(types[id].duration))
+			_spawn_air_coins()
+
+func _spawn_air_coins() -> void:
+	clear_air_coins()
+	flight_serial += 1
+	var distance := 0.0
+	var seconds := float(types.WINGS.duration)
+	for step in range(ceili(seconds * 60.0)):
+		distance += Balance.PLAYER_VERTICAL_SPEED * 1.5 * Balance.speed_scale_for_time(game.total_time + float(step) / 60.0) / 60.0
+	for index in range(maxi(floori((distance - 120.0) / 70.0) + 1, 0)):
+		var y := player.global_position.y - 120.0 - float(index) * 70.0
+		for lane in 3:
+			var id := "WINGS_%d_%d_%d" % [flight_serial, index, lane]
+			# Stage -1 keeps the flight's coins outside the ground coin window.
+			game.golds._spawn({"id": id, "route": lane, "position": Vector2(stages.branch_x_at(lane, y), y)}, -1)
+			var coin := game.golds.get_node(NodePath(id)) as GoldCollectible
+			coin.sprite.position.y = -70.0
+			air_coins.append(coin)
+
+func clear_air_coins() -> void:
+	for coin in air_coins:
+		if is_instance_valid(coin) and not coin.taken:
+			coin.queue_free()
+	air_coins.clear()
 
 func sync_after_player_teleport() -> void:
 	# Keep the run clock and effects through tutorial rewinds and rewarded continues.
@@ -70,9 +106,14 @@ func _physics_process(delta: float) -> void:
 		return
 	visual_time += delta
 	for id: String in active.keys():
-		active[id] = maxf(float(active[id]) - delta, 0.0)
+		if id == "WINGS":
+			active[id] = player.flight_remaining if player.is_flying() else 0.0
+		else:
+			active[id] = maxf(float(active[id]) - delta, 0.0)
 		if float(active[id]) <= 0.0:
 			active.erase(id)
+			if id == "WINGS":
+				clear_air_coins()
 	if game.total_time >= next_spawn_time:
 		_try_spawn()
 	for index in range(items.size() - 1, -1, -1):
