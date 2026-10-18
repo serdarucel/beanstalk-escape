@@ -50,13 +50,11 @@ func stage_gold_count(stage_number: int) -> int:
 	var maximum := value("stage_gold_count_max")
 	return minimum + posmod(stage_number * 2, maximum - minimum + 1)
 
-func collect_gold(multiplier: int = 1) -> Dictionary:
-	multiplier = clampi(multiplier, 1, 5)
-	var reward := value("gold_per_collectible") * multiplier
+func collect_gold(_multiplier: int = 1) -> Dictionary:
+	var reward := 1
 	gold += reward
-	var levels := _add_xp(value("xp_per_gold") * multiplier)
 	_persist_and_emit()
-	return {"gold": reward, "xp": value("xp_per_gold") * multiplier, "level_ups": levels}
+	return {"gold": reward, "xp": 0, "level_ups": 0}
 
 func complete_stage(_stage_number: int) -> Dictionary:
 	return {"gold": 0, "xp": 0, "level_ups": 0}
@@ -67,20 +65,10 @@ func begin_run() -> void:
 	_climb_remainder_px = 0.0
 	_climb_save_elapsed = 0.0
 
-func add_climb(px: float) -> void:
-	if not is_finite(px) or px <= 0.0:
-		return
-	_climb_remainder_px += px
-	var hundreds := int(floor(_climb_remainder_px / 100.0))
-	if hundreds == 0:
-		return
-	_climb_remainder_px -= float(hundreds) * 100.0
-	var amount := hundreds * value("xp_per_100_px")
-	if amount <= 0:
-		return
-	_add_xp(amount)
-	_climb_save_pending = true
-	changed.emit(snapshot())
+func add_climb(_px: float) -> void:
+	# Preserve the legacy API without granting XP during a run.
+	return
+
 
 func update_climb_save(delta: float) -> void:
 	_climb_save_elapsed = minf(_climb_save_elapsed + delta, 1.0)

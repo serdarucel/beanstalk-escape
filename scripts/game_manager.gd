@@ -148,6 +148,13 @@ var powerup_hud_rows: Dictionary = {}
 var total_time := 0.0
 var score := 0.0
 var run_coins := 0
+var run_meters := 0.0
+var missions = preload("res://scripts/mission_manager.gd").new()
+var mission_toasts: Array[String] = []
+var mission_toast_remaining := 0.0
+var mission_cleared_ids: Dictionary = {}
+var mission_powerups := 0
+var mission_lanes := 0
 var score_previous_y := 0.0
 var climb_previous_y := 0.0
 var run_generation := 0
@@ -288,6 +295,12 @@ func _ready() -> void:
 	if not economy.initialize(save_manager):
 		push_error("Economy config could not be loaded")
 	leaderboard_service = preload("res://scripts/leaderboard_service.gd").new()
+	missions.name = "MissionManager"
+	add_child(missions)
+	if not missions.initialize(save_manager):
+		push_error("Mission config could not be loaded")
+	missions.mission_completed.connect(func(text: String): mission_toasts.append("MISSION: " + text + " ✓"))
+	missions.mission_set_completed.connect(func(): mission_toasts.append("MULTIPLIER x%d" % missions.score_multiplier()))
 	leaderboard_service.name = "LeaderboardService"
 	add_child(leaderboard_service)
 	leaderboard_service.configure(save_manager)
@@ -296,7 +309,6 @@ func _ready() -> void:
 	_apply_loaded_profile({"meta_systems": save_manager.meta_systems_snapshot()})
 	_apply_debug_meta_overrides()
 	save_manager.profile_loaded.connect(economy.reload_profile)
-	economy.level_up.connect(_on_level_up)
 	platform_services.platform_pause_changed.connect(_on_platform_pause_changed)
 	platform_services.platform_audio_changed.connect(audio.set_platform_audio_enabled)
 	platform_services.ownership_changed.connect(_on_remove_ads_ownership_changed)
@@ -392,7 +404,12 @@ func _physics_process(delta: float) -> void:
 		if result_elapsed >= 1.0:
 			_show_leaderboard()
 	if app_state == AppState.PLAYING:
-		score += maxf(score_previous_y - player.global_position.y, 0.0) * 0.1 * clampi(golds.combo, 1, 5) * score_multiplier()
+		var climbed := maxf(score_previous_y - player.global_position.y, 0.0)
+		score += climbed * 0.1 * (missions.score_multiplier() + clampi(golds.combo, 1, 5) - 1) * score_multiplier()
+		var meters := climbed / Balance.PIXELS_PER_METER
+		run_meters += meters
+		missions.notify("meters", meters)
+		_update_run_missions(delta)
 		economy.add_climb(maxf(climb_previous_y - player.global_position.y, 0.0))
 	climb_previous_y = player.global_position.y
 	economy.update_climb_save(delta)
@@ -430,8 +447,6 @@ func _physics_process(delta: float) -> void:
 	player.speed_scale = Balance.speed_scale_for_time(total_time)
 	if tutorial_active:
 		_update_onboarding(delta)
-	else:
-		_update_ghost(delta)
 	shake_remaining = maxf(shake_remaining - delta, 0.0)
 	close_text_remaining = maxf(close_text_remaining - delta, 0.0)
 	_apply_impact_fx(delta)
@@ -626,6 +641,13 @@ func restart() -> void:
 	paused_by_platform = false
 	resume_countdown_remaining = 0.0
 	economy.begin_run()
+	missions.begin_run()
+	mission_cleared_ids.clear()
+	mission_powerups = 0
+	mission_lanes = 0
+	mission_toasts.clear()
+	mission_toast_remaining = 0.0
+	run_meters = 0.0
 	resume_available = false
 	_clear_direction_inputs()
 	for child in get_tree().get_nodes_in_group("run_transient"): child.free()
@@ -979,8 +1001,6 @@ func _complete_menu() -> void:
 		_show_menu()
 
 func _on_stage_completed(stage_number: int) -> void:
-	if not tutorial_active and stage_number == ghost_stage and stage_number <= 30:
-		save_manager.record_stage_ghost(mode, stage_number, ghost_stage_elapsed, ghost_trace)
 	completed_stages[stage_number] = true
 	for old in death_count_by_stage.keys():
 		if int(old) < stage_number - Balance.STAGES_BEHIND:
@@ -1014,7 +1034,10 @@ func dispatch_command(command: String, source := "runtime") -> bool:
 	if command == "jump" or command == "hug":
 		if app_state != AppState.PLAYING:
 			return false
-		return player.request_jump() if command == "jump" else player.request_hug()
+		var accepted := player.request_jump() if command == "jump" else player.request_hug()
+		if accepted:
+			missions.notify(command)
+		return accepted
 	if command == "move_left" or command == "move_right":
 		if app_state != AppState.PLAYING:
 			return false
@@ -1041,6 +1064,7 @@ func _lose_life(cause: DeathCause, respawn_from_checkpoint: bool) -> bool:
 	if tutorial_active or app_state != AppState.PLAYING or _hit_invulnerability_remaining > 0.0 or current_lives <= 0:
 		return false
 	current_lives -= 1
+	missions.notify("no_stumble_seconds", 0.0)
 	golds.reset_combo()
 	_end_danger(true)
 	damage_events += 1
@@ -1066,6 +1090,8 @@ func _end_wings() -> void:
 	player.fire_wings_active = false
 
 func _enter_player_dead(cause: DeathCause) -> void:
+	_update_run_missions(0.0)
+	missions.end_run()
 	player.cancel_action()
 	economy.flush_climb_save()
 	golds.reset_combo()
@@ -1100,6 +1126,7 @@ func _show_run_result() -> void:
 		return
 	death_phase = "result"
 	result_recorded = true
+	missions.end_run()
 	result_elapsed = 0.0
 	leaderboard_visible = false
 	ended_runs_since_interstitial += 1
@@ -1481,30 +1508,7 @@ func _focus_default_death_action() -> void:
 	if not actions.is_empty():
 		actions[0].grab_focus()
 
-func _skip_stage_with_ad() -> void:
-	if app_state != AppState.PLAYER_DEAD:
-		return
-	var stage_number := stages.stage_for_y(player.global_position.y)
-	if int(death_count_by_stage.get(stage_number, 0)) < economy.value("skip_stage_death_count"):
-		return
-	platform_services.show_rewarded("skip_stage", _skip_stage_after_reward.bind(stage_number))
 
-func _skip_stage_after_reward(stage_number: int) -> void:
-	if app_state != AppState.PLAYER_DEAD:
-		return
-	if stage_number <= 30:
-		save_manager.mark_stage_skipped(stage_number)
-	stages.ensure_stage(stage_number + 1 + Balance.STAGES_AHEAD)
-	stages.current_stage = stage_number + 1
-	var next_y := stages.stage_bottom_y(stage_number + 1)
-	player.reset_run(Vector2(0, next_y))
-	action_hazards.sync_after_player_teleport()
-	powerups.sync_after_player_teleport()
-	climb_previous_y = player.global_position.y
-	spider.reset_run(Vector2(0, next_y + _spider_start_gap(stage_number + 1)))
-	_begin_danger(true)
-	golds.reset_run()
-	_resume_after_death()
 
 func _double_stage_reward_with_ad() -> void:
 	if double_reward_remaining <= 0.0 or last_stage_gold_reward <= 0:
@@ -1659,25 +1663,8 @@ func _reset_stage_ghost(stage_number: int) -> void:
 		ghost_sprite.visible = false
 
 func _update_ghost(delta: float) -> void:
-	ghost_stage_elapsed += delta
-	ghost_sample_elapsed += delta
-	if ghost_sample_elapsed >= GHOST_SAMPLE_SECONDS:
-		ghost_sample_elapsed = fmod(ghost_sample_elapsed, GHOST_SAMPLE_SECONDS)
-		ghost_trace.append({"t": ghost_stage_elapsed, "x": player.global_position.x, "y": player.global_position.y, "branch": player.active_branch})
-	var visible := bool(meta_settings.ghost) and not ghost_playback.is_empty()
-	ghost_sprite.visible = visible
-	if not visible:
-		return
-	var sample: Dictionary = ghost_playback.back()
-	for candidate in ghost_playback:
-		if float(candidate.t) >= ghost_stage_elapsed:
-			sample = candidate
-			break
-	ghost_sprite.global_position = Vector2(float(sample.x), float(sample.y))
-	var body := player.get_node_or_null("Body") as PlayerVisual
-	if body != null and body.sprite != null:
-		ghost_sprite.texture = body.sprite.texture
-		ghost_outline.texture = body.sprite.texture
+	ghost_sprite.visible = false
+
 
 func show_bean_tutorial() -> void:
 	_queue_hint("bean", "DODGE THE BEANS")
@@ -1816,6 +1803,7 @@ func _on_danger_obstacle_hit() -> void:
 		return
 	if tutorial_active or app_state != AppState.PLAYING or hit_invulnerability_remaining > 0.0 or current_lives <= 0:
 		return
+	missions.notify("no_stumble_seconds", 0.0)
 	if danger_remaining > 0.0:
 		_lose_life(DeathCause.OBSTACLE, false)
 	else:
@@ -2001,7 +1989,7 @@ func _setup_hud() -> void:
 	countdown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	countdown.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_add_label("StageBanner", Vector2(360, 90), "", 20)
-	_add_label("StageCounter", Vector2(16, 62), "STAGE 1 / 30", 14)
+	_add_label("StageCounter", Vector2(16, 62), "", 14)
 	var lives := Control.new()
 	lives.name = "Lives"
 	lives.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2015,6 +2003,22 @@ func _setup_hud() -> void:
 	_add_label("Tutorial", Vector2(360, 130), "", 22)
 	_add_label("GoldStatus", Vector2(690, 62), "GOLD 0", 18)
 	_add_label("Score", Vector2(708, 8), "0", 30)
+	_add_label("Meters", Vector2.ZERO, "METRE 0", 20)
+	_add_label("Multiplier", Vector2.ZERO, "x1", 20)
+	_add_label("MissionToast", Vector2.ZERO, "", 20)
+	var mission_panel := PanelContainer.new()
+	mission_panel.name = "MissionPanel"
+	mission_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$HUD.add_child(mission_panel)
+	var mission_rows := VBoxContainer.new()
+	mission_rows.name = "Rows"
+	mission_panel.add_child(mission_rows)
+	for index in 3:
+		var row := Label.new()
+		row.name = "Mission%d" % index
+		row.theme = ui_theme
+		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		mission_rows.add_child(row)
 	var run_coins_label := _add_label("RunCoins", Vector2(708, 48), "0", 20)
 	var run_coin_icon := TextureRect.new()
 	run_coin_icon.name = "Icon"
@@ -2081,7 +2085,6 @@ func _setup_hud() -> void:
 	_add_action_button("RestartRun", "PLAY AGAIN", _restart_run_from_death)
 	_add_action_button("DeathMenu", "MENU", _menu_from_death)
 	_add_action_button("PauseMenu", "MENU", _menu_from_death)
-	_add_action_button("SkipStageAd", "SKIP STAGE (AD)", _skip_stage_with_ad)
 	_add_action_button("DoubleStageReward", "DOUBLE +0 (AD)", _double_stage_reward_with_ad)
 	_add_action_button("GetMoreGold", "GET 100 GOLD (AD)", _get_more_gold_with_ad)
 	_add_action_button("RemoveAds", "REMOVE ADS", platform_services.purchase_remove_ads)
@@ -2133,6 +2136,7 @@ func _setup_hud() -> void:
 	$HUD.add_child(mini)
 	mini.game = self
 	_add_mute_button()
+	_add_action_button("RunPause", "Ⅱ", _pause_game)
 	meta_ui = MetaShopUI.new()
 	meta_ui.name = "MetaShop"
 	meta_ui.visible = false
@@ -2351,6 +2355,13 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/CompleteMenu.size = Vector2(complete_width, 48.0 if compact else 52.0)
 	$HUD/MetaShop.set_offsets_preset(Control.PRESET_FULL_RECT)
 	_layout_gameplay_text(Vector2(width, height))
+	var mission_width := minf(430.0, width - 32.0)
+	var mission_y: float = $HUD/HowToPlay.position.y + $HUD/HowToPlay.size.y + 12.0
+	$HUD/MissionPanel.position = Vector2((width - mission_width) * 0.5, mission_y)
+	$HUD/MissionPanel.size = Vector2(mission_width, 0.0)
+	for row: Label in $HUD/MissionPanel/Rows.get_children():
+		row.add_theme_font_size_override("font_size", 18)
+		row.custom_minimum_size.x = mission_width - 16.0
 
 func _layout_death_panel(viewport_size: Vector2) -> void:
 	var width := viewport_size.x
@@ -2430,46 +2441,42 @@ func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) ->
 	return top
 
 func _layout_gameplay_text(viewport_size: Vector2) -> void:
-	var window_size := Vector2(DisplayServer.window_get_size())
+	var window_size := Vector2(get_tree().root.size)
 	var pixel_scale := window_size.x / maxf(viewport_size.x, 1.0)
 	var minimum_font := ceili(28.0 * (minf(window_size.x, window_size.y) / 1080.0) / maxf(pixel_scale, 0.001))
-	var design_sizes := {"Score": 30, "RunCoins": 20, "GoldCombo": 16, "Tutorial": 22, "LevelUpCard": 28}
-	for key: String in design_sizes:
-		var label := $HUD.get_node(key) as Label
-		label.add_theme_font_size_override("font_size", maxi(int(design_sizes[key]), minimum_font))
 	var width := viewport_size.x
-	var height := viewport_size.y
-	var right_margin := 64.0
-	var block_width := minf(maxf(width * 0.26, 200.0), width - right_margin - 12.0)
+	# Persistent counters stay outside the gameplay center +/-230.
+	var block_width := maxf(width * 0.5 - 246.0, 1.0)
+	var x := width - block_width - 12.0
 	var top := 8.0
-	for label: Label in [$HUD/Score, $HUD/RunCoins, $HUD/GoldCombo]:
+	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
+		var label := $HUD.get_node(key) as Label
+		var font_size := maxi(32 if key == "Score" else 18, minimum_font)
+		label.add_theme_font_size_override("font_size", font_size)
 		label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		var font_size := label.get_theme_font_size("font_size")
+		var available := maxf(block_width - (32.0 if key == "RunCoins" else 0.0), 1.0)
 		var font := label.get_theme_font("font")
-		var text_width := font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var lines := maxi(ceili(text_width / maxf(block_width - 32.0, 1.0)), 1)
+		var lines := maxi(ceili(font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x / available), 1)
 		var row_height := ceilf(font.get_height(font_size) * lines * 1.3) + 8.0
-		label.position = Vector2(width - right_margin - block_width, top)
+		label.position = Vector2(x, top)
 		label.size = Vector2(block_width, row_height)
 		label.pivot_offset = label.size * Vector2(1.0, 0.5)
 		top += row_height + 4.0
-		if label == $HUD/Score:
-			top = _layout_powerup_rows(width - right_margin - block_width, top, block_width, maxi(18, minimum_font))
-	# On narrow viewports the shared message row sits below the counter block.
-	# On wide viewports it occupies the free center, beside the counters.
-	var message_margin := block_width + right_margin + 32.0
-	var message_y := height * 0.28
-	if width - message_margin * 2.0 < 220.0:
-		message_margin = 16.0
-		message_y = maxf(message_y, top + 8.0)
-	for label: Label in [$HUD/Tutorial, $HUD/LevelUpCard]:
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		var line_height := label.get_theme_font("font").get_height(label.get_theme_font_size("font_size"))
-		_layout_centered_label(label, width, minf(message_y, height - line_height * 2.0 - 12.0), line_height * 2.0, message_margin)
-	$HUD/Mute.position = Vector2(120.0, 8.0) if app_state == AppState.PLAYING and not tutorial_active else Vector2(width - (68.0 if width < height else 128.0), 124.0)
+	_layout_powerup_rows(x, top, block_width, maxi(18, minimum_font))
+	$HUD/Mute.position = Vector2(14.0, 52.0)
+	$HUD/Mute.size = Vector2(56.0, 56.0)
+	$HUD/RunPause.position = Vector2(78.0, 52.0)
+	$HUD/Mute.add_theme_font_size_override("font_size", minimum_font)
+	$HUD/RunPause.size = Vector2(56.0, 56.0)
+	$HUD/RunPause.add_theme_font_size_override("font_size", maxi(22, minimum_font))
+	var toast := $HUD/MissionToast as Label
+	toast.add_theme_font_size_override("font_size", maxi(18, minimum_font))
+	toast.autowrap_mode = TextServer.AUTOWRAP_OFF
+	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	toast.position = Vector2(width * 0.5 - 210.0, 8.0)
+	toast.size = Vector2(420.0, 42.0)
 	_layout_run_coin_icon()
 
 func _layout_centered_label(label: Label, width: float, y: float, height: float, side_margin: float) -> void:
@@ -2514,7 +2521,8 @@ func _layout_intro_guardian(viewport_size: Vector2) -> void:
 	spider.global_position = canvas.affine_inverse() * center - local_bounds.get_center() * fit
 
 func fly_gold_to_counter(screen_transform: Transform2D, arrived: Callable) -> void:
-	var collected_value := economy.value("gold_per_collectible") * mini(golds.combo, 5)
+	var collected_value := 1
+	var magnet_coin := powerups.is_active("MAGNET")
 	var collected_generation := run_generation
 	var layer := $HUD/GoldFlights as Node2D
 	var coin := Sprite2D.new()
@@ -2536,6 +2544,9 @@ func fly_gold_to_counter(screen_transform: Transform2D, arrived: Callable) -> vo
 		coin.queue_free()
 		if collected_generation == run_generation:
 			run_coins += collected_value
+			missions.notify("coins")
+			if magnet_coin:
+				missions.notify("magnet_coins")
 		arrived.call()
 	)
 
@@ -2735,6 +2746,8 @@ func _update_dead_end_warning() -> void:
 	)
 
 func _update_hud() -> void:
+	$HUD/Title.visible = false
+	$HUD/Hint.visible = false
 	_update_dead_end_warning()
 	_update_encounter_hints()
 	_pump_text_messages()
@@ -2781,25 +2794,32 @@ func _update_hud() -> void:
 	$HUD/TutorialPanel.visible = playing and tutorial_active and tutorial_prompt_visible
 	$HUD/TutorialSkip.visible = playing and tutorial_active
 	$HUD/Mute.visible = playing
+	$HUD/RunPause.visible = playing
 	$HUD/IntroText.visible = app_state in [AppState.INTRO, AppState.FINAL_CINEMATIC]
-	$HUD/Gauge.visible = normal_playing
+	$HUD/Gauge.visible = false
 	$HUD/MiniMap.visible = false
 	$HUD/StageBanner.visible = false
 	$HUD/StageCounter.visible = false
 	$HUD/Score.visible = normal_playing
 	$HUD/RunCoins.visible = normal_playing
-	$HUD/GoldCombo.visible = normal_playing
-	$HUD/Score.text = _format_run_number(int(score))
+	$HUD/GoldCombo.visible = false
+	$HUD/Meters.visible = normal_playing
+	$HUD/Multiplier.visible = normal_playing
+	$HUD/Meters.text = "METRE %d" % int(run_meters)
+	$HUD/Multiplier.text = "x%d%s" % [missions.score_multiplier(), " ×2" if powerups.is_active("DOUBLE") else ""]
+	$HUD/Score.text = "SKOR " + _format_run_number(int(score))
 	$HUD/RunCoins.text = _format_run_number(run_coins)
 	_layout_run_coin_icon()
-	$HUD/Tutorial.visible = normal_playing and tutorial_remaining > 0.0 and level_up_remaining <= 0.0
+	$HUD/Tutorial.visible = false
 	$HUD/Lives.visible = normal_playing
 	var balance_visible := result_visible or app_state in [AppState.MENU, AppState.SHOP]
 	$HUD/GoldStatus.visible = balance_visible
 	$HUD/XPStatus.visible = balance_visible
 	$HUD/XPBar.visible = balance_visible
 	$HUD/RewardToast.visible = false
-	$HUD/LevelUpCard.visible = meta_visible and level_up_remaining > 0.0 and tutorial_remaining <= 0.0
+	$HUD/LevelUpCard.visible = false
+	_update_mission_panel()
+	$HUD/MissionToast.visible = normal_playing and mission_toast_remaining > 0.0
 	var death_visible := app_state == AppState.PLAYER_DEAD and not tutorial_active
 	var continue_visible := death_visible and death_phase == "continue"
 	var run_result_visible := death_visible and death_phase == "result"
@@ -2823,15 +2843,14 @@ func _update_hud() -> void:
 	$HUD/DeathShop.visible = board_visible
 	$HUD/DeathMenu.visible = board_visible
 	$HUD/PauseMenu.visible = app_state == AppState.PAUSED
-	$HUD/SkipStageAd.visible = false
 	$HUD/DoubleStageReward.visible = false
 	$HUD/DoubleStageReward.text = "DOUBLE +%d (AD)" % last_stage_gold_reward
 	$HUD/GetMoreGold.visible = app_state == AppState.MENU and platform_services.is_rewarded_supported()
 	$HUD/GetMoreGold.text = "GET %d GOLD (AD)" % economy.value("get_more_gold_reward")
 	$HUD/RemoveAds.visible = app_state == AppState.MENU and platform_services.is_payments_supported() and not platform_services.remove_ads_owned
 	_refresh_sound_icon()
-	$HUD/StageBanner.text = stages.stage_banner if stages.stage_banner_remaining > 0.0 and app_state == AppState.PLAYING else ""
-	$HUD/StageCounter.text = "STAGE %d" % stages.stage_for_y(player.global_position.y)
+	$HUD/StageBanner.text = ""
+	$HUD/StageCounter.text = ""
 	$HUD/Tutorial.text = tutorial_text if tutorial_remaining > 0.0 else ""
 	_layout_gameplay_text(get_viewport_rect().size)
 	_update_lives_hud()
@@ -2856,8 +2875,37 @@ func _update_hud() -> void:
 		$HUD/Replay.text = ""
 	if Engine.get_physics_frames() % 6 == 0:
 		$HUD/MiniMap.queue_redraw()
-	if ghost_sprite != null and not playing:
+	if ghost_sprite != null:
 		ghost_sprite.visible = false
+
+func _update_run_missions(delta: float) -> void:
+	# Observe the real managers after their physics ticks; each clear is counted once.
+	for hazard in action_hazards.hazards:
+		if is_instance_valid(hazard) and action_hazards.cleared_ids.has(hazard.hazard_id) and not mission_cleared_ids.has(hazard.hazard_id):
+			mission_cleared_ids[hazard.hazard_id] = true
+			missions.notify("clear_low" if hazard.action_class == "LOW" else "clear_high")
+	if powerups.collected > mission_powerups:
+		missions.notify("powerups", powerups.collected - mission_powerups)
+	mission_powerups = powerups.collected
+	if player.branch_transition_count > mission_lanes:
+		missions.notify("lane_change", player.branch_transition_count - mission_lanes)
+	mission_lanes = player.branch_transition_count
+	if not tutorial_active:
+		missions.notify("no_stumble_seconds", delta)
+	mission_toast_remaining = maxf(mission_toast_remaining - delta, 0.0)
+	if mission_toast_remaining <= 0.0 and not mission_toasts.is_empty():
+		$HUD/MissionToast.text = mission_toasts.pop_front()
+		mission_toast_remaining = 1.5
+
+func _update_mission_panel() -> void:
+	$HUD/MissionPanel.visible = app_state == AppState.MENU
+	var active: Array = missions.active_missions()
+	for index in 3:
+		var row := $HUD/MissionPanel/Rows.get_child(index) as Label
+		row.visible = index < active.size()
+		if index < active.size():
+			var mission: Dictionary = active[index]
+			row.text = "%s  %d/%d" % [mission.text, int(missions.progress.get(mission.id, 0)), int(mission.target)]
 
 func _format_run_number(value: int) -> String:
 	var digits := str(value)
@@ -2868,9 +2916,6 @@ func _format_run_number(value: int) -> String:
 		result += digits[index]
 	return result
 
-func _on_level_up(new_level: int, gold_reward: int) -> void:
-	text_messages.append({"text": "LEVEL %d · +%d GOLD" % [new_level, gold_reward]})
-	_pump_text_messages()
 
 func _death_text() -> String:
 	match death_cause:
