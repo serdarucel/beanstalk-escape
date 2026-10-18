@@ -3,7 +3,7 @@ extends RefCounted
 
 signal profile_loaded(profile: Dictionary)
 
-const SAVE_VERSION := 5
+const SAVE_VERSION := 6
 const DEFAULT_PATH := "user://profile_v1.json"
 const LEGACY_PET_IDS := {
 	"pet_squirrel": "fairy_leaf",
@@ -275,6 +275,32 @@ func daily_snapshot() -> Dictionary:
 		load_profile()
 	return _sanitize_daily(profile.get("daily", {}))
 
+func missions_snapshot() -> Dictionary:
+	if profile.is_empty():
+		load_profile()
+	return _sanitize_missions(profile.get("missions", {}))
+
+func write_missions(missions: Dictionary) -> bool:
+	if profile.is_empty():
+		load_profile()
+	profile["version"] = SAVE_VERSION
+	profile["missions"] = _sanitize_missions(missions)
+	return _write_profile()
+
+func _sanitize_missions(value: Variant) -> Dictionary:
+	var result := {"set_index": 0, "progress": {}, "multiplier": 1}
+	if value is not Dictionary:
+		return result
+	result.set_index = maxi(int(value.get("set_index", 0)), 0)
+	result.multiplier = clampi(int(value.get("multiplier", 1)), 1, 30)
+	var progress: Variant = value.get("progress", {})
+	if progress is Dictionary:
+		for key in progress:
+			var amount: Variant = progress[key]
+			if (amount is int or amount is float) and is_finite(float(amount)):
+				result.progress[str(key)] = maxf(float(amount), 0.0)
+	return result
+
 func set_remove_ads(value: bool) -> bool:
 	if profile.is_empty():
 		load_profile()
@@ -353,6 +379,7 @@ func _default_profile() -> Dictionary:
 		"meta": {"gold": 0, "xp": 0, "level": 1, "hair_refund_done": true, "emblem_refund_done": true, "trail_refund_done": true, "save_seq": 0},
 		"progression": {"completed_stages": [], "skipped_stages": [], "treasures_claimed": []},
 		"daily": {"day_index": 0, "last_claim_date": ""},
+		"missions": _sanitize_missions({}),
 		"purchases": {"remove_ads": false},
 		"shop": _default_shop(),
 		"replay": _default_replay(),
@@ -516,6 +543,7 @@ func _sanitize_profile(value: Dictionary) -> Dictionary:
 	if value.get("progression", {}) is Dictionary:
 		result.progression = _sanitize_progression(value.get("progression", {}))
 	result.daily = _sanitize_daily(value.get("daily", {}))
+	result.missions = _sanitize_missions(value.get("missions", {}))
 	if value.get("purchases", {}) is Dictionary:
 		result.purchases = value.get("purchases", {}).duplicate(true)
 	result.shop = _sanitize_shop(value.get("shop", {}))

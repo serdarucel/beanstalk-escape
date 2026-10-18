@@ -1,0 +1,54 @@
+{
+  "sets": [
+    {"missions": [
+      {"id": "s1_jump", "type": "jump", "target": 5, "scope": "total", "text": "Jump 5 times"},
+      {"id": "s1_coins", "type": "coins", "target": 50, "scope": "total", "text": "Collect 50 coins"},
+      {"id": "s1_meters", "type": "meters", "target": 300, "scope": "run", "text": "Climb 300 m in one run"}
+    ]},
+    {"missions": [
+      {"id": "s2_hug", "type": "hug", "target": 10, "scope": "total", "text": "Hug 10 times"},
+      {"id": "s2_lane", "type": "lane_change", "target": 20, "scope": "total", "text": "Change lanes 20 times"},
+      {"id": "s2_meters", "type": "meters", "target": 500, "scope": "run", "text": "Climb 500 m in one run"}
+    ]},
+    {"missions": [
+      {"id": "s3_low", "type": "clear_low", "target": 10, "scope": "total", "text": "Jump over 10 low obstacles"},
+      {"id": "s3_high", "type": "clear_high", "target": 10, "scope": "total", "text": "Hug under 10 high obstacles"},
+      {"id": "s3_coins", "type": "coins", "target": 150, "scope": "total", "text": "Collect 150 coins"}
+    ]},
+    {"missions": [
+      {"id": "s4_powerups", "type": "powerups", "target": 5, "scope": "total", "text": "Collect 5 powerups"},
+      {"id": "s4_magnet", "type": "magnet_coins", "target": 50, "scope": "total", "text": "Collect 50 coins with a magnet"},
+      {"id": "s4_clean", "type": "no_stumble_seconds", "target": 30, "scope": "run", "text": "Go 30 seconds without stumbling"}
+    ]},
+    {"missions": [
+      {"id": "s5_jump", "type": "jump", "target": 25, "scope": "run", "text": "Jump 25 times in one run"},
+      {"id": "s5_hug", "type": "hug", "target": 25, "scope": "total", "text": "Hug 25 times"},
+      {"id": "s5_meters", "type": "meters", "target": 1000, "scope": "run", "text": "Climb 1000 m in one run"}
+    ]},
+    {"missions": [
+      {"id": "s6_low", "type": "clear_low", "target": 30, "scope": "total", "text": "Jump over 30 low obstacles"},
+      {"id": "s6_high", "type": "clear_high", "target": 30, "scope": "total", "text": "Hug under 30 high obstacles"},
+      {"id": "s6_coins", "type": "coins", "target": 250, "scope": "run", "text": "Collect 250 coins in one run"}
+    ]},
+    {"missions": [
+      {"id": "s7_powerups", "type": "powerups", "target": 15, "scope": "total", "text": "Collect 15 powerups"},
+      {"id": "s7_magnet", "type": "magnet_coins", "target": 150, "scope": "total", "text": "Collect 150 coins with a magnet"},
+      {"id": "s7_meters", "type": "meters", "target": 1500, "scope": "run", "text": "Climb 1500 m in one run"}
+    ]},
+    {"missions": [
+      {"id": "s8_lane", "type": "lane_change", "target": 60, "scope": "run", "text": "Change lanes 60 times in one run"},
+      {"id": "s8_jump", "type": "jump", "target": 50, "scope": "run", "text": "Jump 50 times in one run"},
+      {"id": "s8_clean", "type": "no_stumble_seconds", "target": 60, "scope": "run", "text": "Go 60 seconds without stumbling"}
+    ]},
+    {"missions": [
+      {"id": "s9_low", "type": "clear_low", "target": 40, "scope": "run", "text": "Clear 40 low obstacles in one run"},
+      {"id": "s9_high", "type": "clear_high", "target": 40, "scope": "run", "text": "Clear 40 high obstacles in one run"},
+      {"id": "s9_coins", "type": "coins", "target": 500, "scope": "run", "text": "Collect 500 coins in one run"}
+    ]},
+    {"missions": [
+      {"id": "s10_meters", "type": "meters", "target": 3000, "scope": "run", "text": "Climb 3000 m in one run"},
+      {"id": "s10_clean", "type": "no_stumble_seconds", "target": 90, "scope": "run", "text": "Go 90 seconds without stumbling"},
+      {"id": "s10_magnet", "type": "magnet_coins", "target": 300, "scope": "run", "text": "Collect 300 magnet coins in one run"}
+    ]}
+  ]
+}
