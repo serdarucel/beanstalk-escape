@@ -2306,7 +2306,11 @@ func _set_camera_position(camera: Camera2D, local_position: Vector2) -> void:
 	camera.global_position.x = 0.0
 
 func layout_hud_for_viewport(viewport_size: Vector2) -> void:
-	camera_play_position = Vector2(0.0, viewport_size.y * (0.5 - CAMERA_PLAYER_HEIGHT_RATIO))
+	var player_screen_y := viewport_size.y * CAMERA_PLAYER_HEIGHT_RATIO
+	if viewport_size.x > viewport_size.y:
+		# Keep the fixed foot pivot 30 world pixels above the landscape bottom edge.
+		player_screen_y = viewport_size.y - 30.0 - PlayerVisual.EXPLORER_FOOT_Y
+	camera_play_position = Vector2(0.0, viewport_size.y * 0.5 - player_screen_y)
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
 		if intro_active and intro_beat == 0:
