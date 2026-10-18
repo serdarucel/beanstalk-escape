@@ -1589,7 +1589,7 @@ func _start_onboarding() -> void:
 
 func _update_onboarding(delta: float) -> void:
 	tutorial_step_elapsed += delta
-	_place_onboarding_gesture()
+	$HUD/TutorialArrow.queue_redraw()
 	var opening: Dictionary = stages.stage_records[3]
 	var encounter: Dictionary = opening.encounters[tutorial_step - 1]
 	var target_y := -(float(opening.start_height) + float(encounter.anchor))
@@ -1679,158 +1679,26 @@ class TutorialSkipButton extends Button:
 		# A 32px visible button retains a 44px touch target.
 		return Rect2(Vector2(0.0, -6.0), size + Vector2(0.0, 12.0)).has_point(point)
 
-class TutorialGesture extends Control:
-	var body_width := 16.0
-	var border_width := 4.0
-	var hand_height := 40.0
-	var path_length := 64.0
-	var direction := Vector2.RIGHT
-	var double_head := true
-
-	func hand_points() -> PackedVector2Array:
-		# One solid silhouette: extended index finger, curled fingers, thumb and wrist.
-		var points := PackedVector2Array([
-			Vector2(-0.10, 0.42), Vector2(-0.10, 0.06), Vector2(-0.06, 0.0),
-			Vector2(0.04, 0.0), Vector2(0.09, 0.06), Vector2(0.09, 0.39),
-			Vector2(0.18, 0.32), Vector2(0.27, 0.37), Vector2(0.36, 0.39),
-			Vector2(0.43, 0.47), Vector2(0.43, 0.74), Vector2(0.29, 0.89),
-			Vector2(0.29, 1.0), Vector2(-0.08, 1.0), Vector2(-0.08, 0.88),
-			Vector2(-0.29, 0.63), Vector2(-0.33, 0.48), Vector2(-0.26, 0.42),
-			Vector2(-0.19, 0.45), Vector2(-0.10, 0.57)])
-		for index in points.size():
-			points[index] *= hand_height
-		return points
-
-	func arrow_points() -> PackedVector2Array:
-		var side := direction.orthogonal()
-		var start := -direction * path_length * 0.5
-		var end := -start
-		var head := body_width * 3.0
-		var neck := end - direction * head * 0.6
-		var tail := start + direction * head * 0.6 if double_head else start
-		var points := PackedVector2Array([
-			tail + side * body_width * 0.5, neck + side * body_width * 0.5,
-			neck + side * head * 0.5, end, neck - side * head * 0.5,
-			neck - side * body_width * 0.5, tail - side * body_width * 0.5])
-		if double_head:
-			points.append(tail - side * head * 0.5)
-			points.append(start)
-			points.append(tail + side * head * 0.5)
-		return points
-
-	func sweep_rect() -> Rect2:
-		var bounds := Rect2(Vector2.ZERO, Vector2.ZERO)
-		for point in arrow_points():
-			bounds = bounds.expand(point)
-		# Reserve the entire hand trajectory, including the unchanged 4px pulse.
-		for endpoint in [-1.0, 1.0]:
-			for point in hand_points():
-				bounds = bounds.expand(point + direction * hand_travel_length() * 0.5 * endpoint + hand_offset())
-		return bounds.grow(border_width + 5.0)
-
-	func hand_travel_length() -> float:
-		return maxf(path_length - hand_height, body_width)
-
-	func hand_offset() -> Vector2:
-		return Vector2(body_width * 1.8, -hand_height * 0.5)
-
-	func draw_shape(points: PackedVector2Array, color: Color) -> void:
-		var closed := points.duplicate()
-		closed.append(points[0])
-		draw_polyline(closed, Color("1b2a2a"), border_width * 2.0, true)
-		draw_colored_polygon(points, color)
-
 func _draw_onboarding_arrow() -> void:
-	var arrow := $HUD/TutorialArrow as TutorialGesture
-	var origin := -arrow.sweep_rect().position
-	var pulse := arrow.direction * sin(tutorial_step_elapsed * 4.0) * 4.0
-	arrow.draw_set_transform(origin + pulse)
-	arrow.draw_shape(arrow.arrow_points(), Color.WHITE)
+	var arrow := $HUD/TutorialArrow as Control
+	var center := arrow.size * 0.5
+	var direction := Vector2.RIGHT if tutorial_step == 1 else (Vector2.UP if tutorial_step == 2 else Vector2.DOWN)
+	var length := arrow.size.y - 20.0
+	var pulse := sin(tutorial_step_elapsed * 4.0) * 4.0
+	var start := center - direction * (length * 0.5) + direction * pulse
+	var end := start + direction * length
+	var side := direction.orthogonal()
+	var color := Color("a9fff1")
+	arrow.draw_line(start, end, color, 5.0, true)
+	arrow.draw_polyline(PackedVector2Array([end - direction * 14.0 + side * 12.0, end, end - direction * 14.0 - side * 12.0]), color, 5.0, true)
+	if tutorial_step == 1:
+		arrow.draw_polyline(PackedVector2Array([start + direction * 14.0 + side * 12.0, start, start + direction * 14.0 - side * 12.0]), color, 5.0, true)
 	if DisplayServer.is_touchscreen_available():
-		var travel := fmod(tutorial_step_elapsed, 1.2) / 1.2 - 0.5
-		arrow.draw_set_transform(origin + pulse + arrow.direction * arrow.hand_travel_length() * travel + arrow.hand_offset())
-		arrow.draw_shape(arrow.hand_points(), Color.WHITE)
-	arrow.draw_set_transform(Vector2.ZERO)
-
-func _onboarding_blockers() -> Array[Rect2]:
-	var blocked: Array[Rect2] = []
-	var hud_inverse := ($HUD/TutorialArrow as Control).get_canvas_transform().affine_inverse()
-	# Sprite bounds include the coin's rotation, pop tween and visual lane offset.
-	for owner_node in [golds, player.get_node("Body"), beans, rocks]:
-		for node in owner_node.find_children("*", "Sprite2D", true, false):
-			var sprite := node as Sprite2D
-			if sprite.is_visible_in_tree() and sprite.texture != null:
-				blocked.append((hud_inverse * sprite.get_global_transform_with_canvas()) * sprite.get_rect())
-	# Beans and their warning badges are drawn directly, without Sprite2D nodes.
-	for bean in beans.get_children():
-		if not bean is BeanProjectile:
-			continue
-		for key in ["Body", "Warning"]:
-			var visual: Variant = bean.get_node(key)
-			if not visual.is_visible_in_tree():
-				continue
-			var transform: Transform2D = hud_inverse * visual.get_global_transform_with_canvas()
-			if key == "Warning":
-				var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.018) * 0.14
-				for rect in visual.warning_rects(pulse, visual.warning_offset(pulse)):
-					blocked.append(transform * rect)
-			else:
-				var size := Vector2.ZERO
-				for frame in visual.BEAN_FRAMES:
-					size = size.max(frame.get_size() * (0.26 if visual.burst else 0.22))
-				blocked.append(transform * Rect2(-size * 0.5, size))
-	for hazard in action_hazards.hazards:
-		if not is_instance_valid(hazard) or not hazard.is_visible_in_tree():
-			continue
-		var rect := Rect2(Vector2(-44, -34), Vector2(88, 68))
-		if hazard.texture != null:
-			var sprite_size: Vector2 = hazard.sprite_size()
-			rect = Rect2(-hazard.visible_bounds(hazard.texture).get_center() * (sprite_size / hazard.texture.get_size()), sprite_size)
-		var pose := Transform2D(hazard.visual_angle(hazard.position.y), Vector2(hazard.visual_x(hazard.position.y) - hazard.position.x, 0))
-		blocked.append((hud_inverse * hazard.get_global_transform_with_canvas() * pose) * rect.grow(4.0 * hazard.screen_pixel()))
-	# Keep the upper prompt out of the player's current lane as well as their body.
-	var body := player.get_node("Body") as PlayerVisual
-	var player_rect := (hud_inverse * body.sprite.get_global_transform_with_canvas()) * body.sprite.get_rect()
-	blocked.append(Rect2(Vector2(player_rect.position.x, 0), Vector2(player_rect.size.x, get_viewport_rect().size.y * 0.5)))
-	var upper_screen := Rect2(Vector2.ZERO, Vector2(get_viewport_rect().size.x, get_viewport_rect().size.y * 0.5))
-	for index in range(blocked.size() - 1, -1, -1):
-		if not upper_screen.intersects(blocked[index]):
-			blocked.remove_at(index)
-	return blocked
-
-func _place_onboarding_gesture() -> void:
-	var arrow := $HUD/TutorialArrow as TutorialGesture
-	var panel := $HUD/TutorialPanel as Label
-	var viewport := get_viewport_rect().size
-	var preferred := Vector2((viewport.x - arrow.size.x) * 0.5, panel.get_rect().end.y + 8.0)
-	var area := Rect2(Vector2(8.0, preferred.y), Vector2(viewport.x - 16.0, viewport.y * 0.5 - preferred.y))
-	var blocked := _onboarding_blockers()
-	# The nearest free rectangle has an edge at the preferred position, a blocker
-	# edge or the screen edge. Test those coordinates rather than a coarse grid.
-	var xs: Array[float] = [preferred.x, area.position.x, area.end.x - arrow.size.x]
-	var ys: Array[float] = [preferred.y]
-	for rect in blocked:
-		xs.append(rect.position.x - arrow.size.x - 8.0)
-		xs.append(rect.end.x + 8.0)
-		ys.append(rect.end.y + 8.0)
-	var nearest := INF
-	for y in ys:
-		for x in xs:
-			var candidate := Rect2(Vector2(x, y), arrow.size)
-			if not area.encloses(candidate):
-				continue
-			var distance := preferred.distance_squared_to(candidate.position)
-			if distance >= nearest:
-				continue
-			var free := true
-			for rect in blocked:
-				if candidate.intersects(rect.grow(4.0)):
-					free = false
-					break
-			if free:
-				nearest = distance
-				arrow.position = candidate.position
-	arrow.queue_redraw()
+		# Draw a fingertip and palm, avoiding platform-dependent emoji glyphs.
+		var finger := start.lerp(end, fmod(tutorial_step_elapsed, 1.2) / 1.2)
+		arrow.draw_circle(finger, 7.0, Color("ffdcaf"))
+		arrow.draw_line(finger, finger + Vector2(0, 17), Color("ffdcaf"), 9.0, true)
+		arrow.draw_circle(finger + Vector2(5, 22), 11.0, Color("ffdcaf"))
 
 func _finish_onboarding() -> void:
 	if not tutorial_active:
@@ -2164,7 +2032,7 @@ func _setup_hud() -> void:
 	tutorial_box.content_margin_left = 18.0
 	tutorial_box.content_margin_right = 18.0
 	tutorial_panel.add_theme_stylebox_override("normal", tutorial_box)
-	var tutorial_arrow := TutorialGesture.new()
+	var tutorial_arrow := Control.new()
 	tutorial_arrow.name = "TutorialArrow"
 	tutorial_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$HUD.add_child(tutorial_arrow)
@@ -2539,15 +2407,8 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	var text_height := tutorial_panel.get_theme_font("font").get_height(tutorial_font)
 	tutorial_panel.position = Vector2((width - tutorial_width) * 0.5, 112.0)
 	tutorial_panel.size = Vector2(tutorial_width, text_height * lines + 12.0)
-	var gesture := $HUD/TutorialArrow as TutorialGesture
-	gesture.body_width = 16.0 / maxf(tutorial_scale, 0.001)
-	gesture.border_width = 4.0 / maxf(tutorial_scale, 0.001)
-	gesture.hand_height = tutorial_font * 1.6
-	gesture.path_length = maxf(text_height * 2.0, gesture.body_width * 6.0)
-	gesture.direction = Vector2.RIGHT if tutorial_step == 1 else (Vector2.UP if tutorial_step == 2 else Vector2.DOWN)
-	gesture.double_head = tutorial_step == 1
-	gesture.size = gesture.sweep_rect().size.max(Vector2(0.0, text_height * 2.0 + 20.0))
-	_place_onboarding_gesture()
+	$HUD/TutorialArrow.position = Vector2(width * 0.5 - 64.0, tutorial_panel.position.y + tutorial_panel.size.y)
+	$HUD/TutorialArrow.size = Vector2(128.0, text_height * 2.0 + 20.0)
 	var skip_bottom := 8.0
 	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
 		var counter := $HUD.get_node(key) as Control
