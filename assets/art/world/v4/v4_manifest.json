@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-18",
+  "generator": "tools/world_v4_textures.py",
+  "provenance": "Pillow derivation of owner-selected A paintings; no new generated artwork; source rights unchanged",
+  "license": "Derived from supplied project A images; no additional third-party license introduced",
+  "sources": {
+    "A-yatay.png": {
+      "size_px": [
+        2400,
+        1080
+      ],
+      "sha256": "b5c0c52869539f2ecf1a0d7fd3264f0ba9f448ecab1e552d995662833ff36321"
+    },
+    "A-dikey.png": {
+      "size_px": [
+        1080,
+        2400
+      ],
+      "sha256": "07c8a9af639190232f29ef07ee716e67697dcff98e70e37304019fe9d3f7883c"
+    }
+  },
+  "vine_tile": {
+    "file": "vine_tile.png",
+    "size_px": [
+      132,
+      183
+    ],
+    "width_px": 132,
+    "height_px": 183,
+    "sha256": "ec00b517c3de111b5c199b3b1a2d6a3e34183916dfa8e9a357175038b84c0d5d",
+    "source": {
+      "file": "01-tasarim/dunya-v4/A-dikey.png",
+      "crop_rect_xyxy": [
+        175,
+        600,
+        320,
+        1150
+      ],
+      "rectified_period_rows": [
+        144,
+        327
+      ],
+      "operations": "sky matte; row rectification; edge color replacement; periodic boundary blend; 2px padding"
+    },
+    "body_width_px": 128,
+    "period_px": 183
+  },
+  "trunk_tile": {
+    "file": "trunk_tile.png",
+    "size_px": [
+      196,
+      256
+    ],
+    "width_px": 196,
+    "height_px": 256,
+    "sha256": "4a5cbc90eaa1dcf3dbc3cfc1a48dcc1fec12a4628e2d49752964391835e3ab5c",
+    "source": {
+      "file": "01-tasarim/dunya-v4/A-yatay.png",
+      "crop_rect_xyxy": [
+        1100,
+        0,
+        1230,
+        80
+      ],
+      "operations": "row rectification; resize; cool/dark/desaturate; periodic blend; 2px padding"
+    },
+    "body_width_px": 192
+  },
+  "crown": {
+    "file": "crown.png",
+    "size_px": [
+      1150,
+      360
+    ],
+    "width_px": 1150,
+    "height_px": 360,
+    "sha256": "a983a2ac3b762b418c703f82d43e238030672235637bdcc8af356bf26a6792cb",
+    "source": {
+      "file": "01-tasarim/dunya-v4/A-yatay.png",
+      "crop_rect_xyxy": [
+        620,
+        0,
+        1770,
+        360
+      ],
+      "operations": "green extraction; central sprout removal; cool/dark bough; clean vine exits replace coin; 40px alpha fade"
+    },
+    "loop_centers_x_px": [
+      280,
+      580,
+      880
+    ],
+    "branch_y_px": 116,
+    "trunk_center_x_px": 580,
+    "vine_exit_y_px": 260,
+    "vine_fade_end_y_px": 300
+  },
+  "placement": {
+    "pixels_per_world_unit": 2,
+    "lane_centers_world": [
+      -150,
+      0,
+      150
+    ],
+    "vine_body_width_world": 64,
+    "trunk_body_width_world": 96,
+    "tile_origin": "top-left; silhouette starts at x=2",
+    "crown_origin": "top-left",
+    "join": "draw trunk, then vines starting at crown y=260, then crown; match vine phase 0 there"
+  },
+  "preview": {
+    "file": "03-test/uygula-v4-20261018/doku-onizleme.png",
+    "size_px": [
+      2400,
+      1300
+    ],
+    "sha256": "d9609c5da62a41f24afe8623c3faf2e4627fcb95b8607de64a7182805a121afe"
+  },
+  "quick_check": {
+    "preview_exists": true,
+    "preview_size_px": [
+      2400,
+      1300
+    ]
+  },
+  "known_limitations": [
+    "Gameplay integration and runtime acceptance belong to the separate implementation brief.",
+    "Branch surface y=116 is the central placement anchor; the painted bough is curved.",
+    "Crown is cropped at the top as in A; intended for top-of-scene placement."
+  ]
+}
