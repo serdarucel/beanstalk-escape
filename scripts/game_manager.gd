@@ -457,6 +457,15 @@ func _input(event: InputEvent) -> void:
 	if app_state == AppState.PLAYER_DEAD and _handle_death_panel_keyboard(event):
 		get_viewport().set_input_as_handled()
 		return
+	if app_state == AppState.PLAYING and event is InputEventKey and event.pressed and not event.echo:
+		if event.is_action_pressed("jump"):
+			dispatch_command("jump", "keyboard")
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("hug"):
+			dispatch_command("hug", "keyboard")
+			get_viewport().set_input_as_handled()
+			return
 	var is_time_wings_key: bool = event.is_action_pressed("time_wings") or (event is InputEventKey and event.physical_keycode == KEY_F and event.pressed)
 	if app_state == AppState.PLAYING and is_time_wings_key and not (event is InputEventKey and event.echo):
 		dispatch_command("time_wings", "keyboard")
@@ -586,9 +595,12 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	if gesture.consumed:
 		return
 	var displacement: Vector2 = event.position - Vector2(gesture.origin)
-	if absf(displacement.x) >= 36.0 and absf(displacement.x) > absf(displacement.y):
+	if absf(displacement.x) >= Balance.SWIPE_MIN_PX and absf(displacement.x) > absf(displacement.y):
 		gesture.consumed = true
 		dispatch_command("move_left" if displacement.x < 0.0 else "move_right", "mobile")
+	elif absf(displacement.y) >= Balance.SWIPE_MIN_PX and absf(displacement.y) > absf(displacement.x):
+		gesture.consumed = true
+		dispatch_command("jump" if displacement.y < 0.0 else "hug", "mobile")
 
 func restart() -> void:
 	paused_by_platform = false
@@ -1004,6 +1016,10 @@ func try_fire_wings() -> bool:
 	return true
 
 func dispatch_command(command: String, source := "runtime") -> bool:
+	if command == "jump" or command == "hug":
+		if app_state != AppState.PLAYING:
+			return false
+		return player.request_jump() if command == "jump" else player.request_hug()
 	if command == "move_left" or command == "move_right":
 		if app_state != AppState.PLAYING:
 			return false
@@ -1055,6 +1071,7 @@ func _end_wings() -> void:
 	player.fire_wings_active = false
 
 func _enter_player_dead(cause: DeathCause) -> void:
+	player.cancel_action()
 	economy.flush_climb_save()
 	golds.reset_combo()
 	resume_available = false
@@ -3002,6 +3019,8 @@ func _start_debug_stage(stage_number: int) -> void:
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 
 func _ensure_actions() -> void:
+	_add_key_action("jump", [KEY_W, KEY_UP])
+	_add_key_action("hug", [KEY_S, KEY_DOWN])
 	_add_key_action("time_wings", [KEY_F])
 	_add_key_action("fire_wings", [KEY_H])
 	_add_key_action("pause", [KEY_ESCAPE, KEY_P])

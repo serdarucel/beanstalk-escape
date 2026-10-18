@@ -3,6 +3,13 @@ extends CharacterBody2D
 
 enum MovementMode { TRUNK, ATTACHED, TRANSITION }
 enum SupportState { SUPPORTED, TRANSFERRING, FALLING_RECOVERY }
+enum ActionState { NONE, AIRBORNE, HUG }
+
+var action_state := ActionState.NONE
+var action_remaining := 0.0
+var action_total := 0.0
+var _action_visual_scale := 1.0
+var _action_visual_brightness := 1.0
 
 var spawn_position := Vector2.ZERO
 var knockback_remaining := 0.0
@@ -42,6 +49,20 @@ func _ready() -> void:
 	_sync_stage_mode()
 
 func _physics_process(delta: float) -> void:
+	_remove_action_visual()
+	if knockback_remaining > 0.0 or stun_remaining > 0.0:
+		cancel_action()
+	elif action_state != ActionState.NONE:
+		action_remaining = maxf(action_remaining - delta, 0.0)
+		if action_remaining <= 0.00001:
+			action_state = ActionState.NONE
+			action_remaining = 0.0
+			action_total = 0.0
+	_update_movement(delta)
+	_apply_action_visual()
+	queue_redraw()
+
+func _update_movement(delta: float) -> void:
 	knockback_remaining = maxf(knockback_remaining - delta, 0.0)
 	if knockback_remaining <= 0.0:
 		rock_knockback_requires_support = false
@@ -75,6 +96,71 @@ func _physics_process(delta: float) -> void:
 	elif support_state == SupportState.SUPPORTED:
 		global_position.x = stages.branch_x_at(active_branch, global_position.y) + support_offset
 	_update_vine_visual_offset()
+
+func request_jump() -> bool:
+	if action_state == ActionState.AIRBORNE or knockback_remaining > 0.0 or stun_remaining > 0.0:
+		return false
+	_start_action(ActionState.AIRBORNE, maxf(Balance.JUMP_AIR_SECONDS_MIN, Balance.JUMP_AIR_SECONDS_BASE / sqrt(maxf(speed_scale, 0.00001))))
+	return true
+
+func request_hug() -> bool:
+	if knockback_remaining > 0.0 or stun_remaining > 0.0:
+		return false
+	_start_action(ActionState.HUG, Balance.HUG_SECONDS)
+	return true
+
+func _start_action(next_state: ActionState, seconds: float) -> void:
+	_remove_action_visual()
+	action_state = next_state
+	action_remaining = seconds
+	action_total = seconds
+	_apply_action_visual()
+	queue_redraw()
+
+func is_airborne() -> bool:
+	return action_state == ActionState.AIRBORNE
+
+func is_hugging() -> bool:
+	return action_state == ActionState.HUG
+
+func cancel_action() -> void:
+	_remove_action_visual()
+	action_state = ActionState.NONE
+	action_remaining = 0.0
+	action_total = 0.0
+	queue_redraw()
+
+func _remove_action_visual() -> void:
+	if body != null:
+		body.scale /= _action_visual_scale
+		body.modulate = Color(body.modulate.r / _action_visual_brightness, body.modulate.g / _action_visual_brightness, body.modulate.b / _action_visual_brightness, body.modulate.a)
+	_action_visual_scale = 1.0
+	_action_visual_brightness = 1.0
+
+func _apply_action_visual() -> void:
+	if body == null:
+		return
+	if is_airborne():
+		var progress := 1.0 - action_remaining / action_total
+		_action_visual_scale = lerpf(1.0, Balance.JUMP_VISUAL_SCALE, sin(PI * progress))
+	elif is_hugging():
+		var blend := clampf(minf(action_total - action_remaining, action_remaining) / 0.08, 0.0, 1.0)
+		_action_visual_scale = lerpf(1.0, Balance.HUG_VISUAL_SCALE, blend)
+		_action_visual_brightness = lerpf(1.0, 0.70, blend)
+	body.scale *= _action_visual_scale
+	body.modulate = Color(body.modulate.r * _action_visual_brightness, body.modulate.g * _action_visual_brightness, body.modulate.b * _action_visual_brightness, body.modulate.a)
+
+func _draw() -> void:
+	if not is_airborne():
+		return
+	var progress := 1.0 - action_remaining / action_total
+	var shadow_scale := lerpf(1.0, 0.65, sin(PI * progress))
+	var center := Vector2(body.position.x if body != null else 0.0, 0.0)
+	var points := PackedVector2Array()
+	for index in range(32):
+		var angle := TAU * float(index) / 32.0
+		points.append(center + Vector2(cos(angle) * 22.0, sin(angle) * 7.0) * shadow_scale)
+	draw_colored_polygon(points, Color(0.05, 0.08, 0.06, 0.35))
 
 func _update_vine_visual_offset() -> void:
 	if body == null or stages == null or stages.stage_for_y(global_position.y) <= 2:
@@ -260,6 +346,7 @@ func _update_falling_recovery(delta: float) -> void:
 			game.call("_die", GameManager.DeathCause.FALL)
 
 func reset_run(at_position: Vector2) -> void:
+	cancel_action()
 	global_position = at_position
 	velocity = Vector2.ZERO
 	knockback_remaining = 0.0
@@ -291,6 +378,7 @@ func reset_run(at_position: Vector2) -> void:
 	_reset_visual_pose()
 
 func apply_bean_hit() -> void:
+	cancel_action()
 	bean_penalty_count += 1
 	rock_knockback_requires_support = false
 	if movement_mode == MovementMode.TRANSITION:
@@ -300,6 +388,7 @@ func apply_bean_hit() -> void:
 	knockback_speed = Balance.BEAN_KNOCKBACK_SPEED
 
 func apply_rock_hit(_hit_id: String) -> void:
+	cancel_action()
 	rock_penalty_count += 1
 	rock_knockback_requires_support = movement_mode == MovementMode.ATTACHED and support_state == SupportState.SUPPORTED
 	if movement_mode == MovementMode.TRANSITION:
