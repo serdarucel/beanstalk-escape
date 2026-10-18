@@ -40,8 +40,6 @@ func _physics_process(_delta: float) -> void:
 				var target_y: float = stage_bottom_y - float(slot.anchor) - float(volley_index) * volley_gap
 				var key := "%d:%d:%d" % [stage_pattern.stage, slot_index, volley_index]
 				if not spawned_keys.has(key) and player.global_position.y <= warning_y:
-					if game != null:
-						game.show_bean_tutorial()
 					var blocked_route := stages.route_for_x(player.global_position.x) if int(stage_pattern.stage) <= 2 else int(slot.blocked_route)
 					spawn_bean(blocked_route, target_y, key)
 				if spawned_keys.has(key) and player.global_position.y <= target_y:
@@ -72,6 +70,8 @@ func spawn_bean(route: int, target_y: float, key := "forced") -> BeanProjectile:
 	bean.set_meta("encounter_key", key)
 	spawned_keys[key] = bean.get_path()
 	warning_count += 1
+	if game != null:
+		game.show_bean_tutorial()
 	return bean
 
 func force_contact(bean: BeanProjectile) -> void:

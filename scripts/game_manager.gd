@@ -116,12 +116,13 @@ var time_wings_started_remaining := 0.0
 var time_wings_used_stage := {}
 var time_wings_notice := ""
 var time_wings_notice_remaining := 0.0
-var time_wings_stage_intro_shown := false
 var fire_wings_remaining := 0.0
 var fire_wings_started_remaining := 0.0
 var fire_wings_used_stage := {}
 var tutorial_remaining := 0.0
 var tutorial_text := ""
+var text_messages: Array[Dictionary] = []
+var hint_gap_remaining := 0.0
 var touch_gestures := {}
 var dead_restart_delay := 0.0
 var confirm_pending := false
@@ -266,7 +267,8 @@ func _physics_process(delta: float) -> void:
 	_update_danger(delta)
 	reward_toast_remaining = maxf(reward_toast_remaining - delta, 0.0)
 	time_wings_notice_remaining = maxf(time_wings_notice_remaining - delta, 0.0)
-	level_up_remaining = maxf(level_up_remaining - delta, 0.0)
+	if (app_state == AppState.PLAYING and not tutorial_active) or app_state == AppState.GAME_COMPLETE:
+		_advance_text_messages(delta)
 	double_reward_remaining = maxf(double_reward_remaining - delta, 0.0)
 	if dead_restart_delay > 0.0:
 		dead_restart_delay = maxf(dead_restart_delay - delta, 0.0)
@@ -309,8 +311,6 @@ func _physics_process(delta: float) -> void:
 		fire_wings_remaining = maxf(fire_wings_remaining - delta, 0.0)
 		if fire_wings_remaining <= 0.0:
 			player.fire_wings_active = false
-	if tutorial_remaining > 0.0:
-		tutorial_remaining = maxf(tutorial_remaining - delta, 0.0)
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 	if gauge.distance_px < SPIDER_RED_ZONE_PX:
 		spider_red_zone_seen = true
@@ -529,7 +529,6 @@ func restart() -> void:
 	time_wings_used_stage.clear()
 	time_wings_notice = ""
 	time_wings_notice_remaining = 0.0
-	time_wings_stage_intro_shown = false
 	fire_wings_remaining = 0.0
 	fire_wings_started_remaining = 0.0
 	fire_wings_used_stage.clear()
@@ -549,7 +548,11 @@ func restart() -> void:
 	player.time_wings_active = false
 	player.fire_wings_active = false
 	player.remove_from_group("time_wings_active")
-	_show_tutorial_for_stage(1)
+	text_messages.clear()
+	tutorial_text = ""
+	tutorial_remaining = 0.0
+	level_up_remaining = 0.0
+	hint_gap_remaining = 0.0
 	_reset_stage_ghost(1)
 	_begin_danger(true)
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
@@ -731,7 +734,6 @@ func restart_stage() -> void:
 	death_cause = DeathCause.NONE
 	dead_restart_delay = 0.0
 	confirm_pending = false
-	_show_tutorial_for_stage(stage_number)
 	_reset_stage_ghost(stage_number)
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 	_update_hud()
@@ -835,7 +837,6 @@ func _on_stage_completed(stage_number: int) -> void:
 	reward_toast_remaining = 0.0
 	double_reward_remaining = 0.0
 	$HUD/RewardToast.text = "+%d GOLD  +%d XP" % [reward.gold, reward.xp]
-	_show_tutorial_for_stage(stage_number + 1)
 	_reset_stage_ghost(stage_number + 1)
 
 func try_time_wings() -> bool:
@@ -1423,7 +1424,7 @@ func _spawn_tutorial_bean() -> void:
 
 func _show_onboarding_step() -> void:
 	var messages := {
-		1: "1 / 3  CHANGE BRANCH\nPress LEFT or RIGHT once. One press commits one branch change.",
+		1: "1 / 3  CHANGE BRANCH\n" + ("Swipe left or right to change branch." if DisplayServer.is_touchscreen_available() else "Press LEFT or RIGHT once. One press commits one branch change."),
 		2: "2 / 3  DODGE THE BEAN\nA bean is falling on your route. Change branch once to escape.",
 		3: "3 / 3  SPIDER CATCH\nThe spider is closing in. Watch the controlled catch.",
 	}
@@ -1477,25 +1478,83 @@ func _update_ghost(delta: float) -> void:
 		ghost_sprite.texture = body.sprite.texture
 		ghost_outline.texture = body.sprite.texture
 
-func _show_tutorial_for_stage(stage_number: int) -> void:
-	if is_nightmare_mode():
-		tutorial_text = ""
-		tutorial_remaining = 0.0
-		return
-	if stage_number == Balance.TIME_WINGS_STAGE and not time_wings_stage_intro_shown:
-		time_wings_stage_intro_shown = true
-		_show_time_wings_notice("TIME WINGS · PRESS F", 2.5)
-		return
-	var messages := {1: "MOVE LEFT / RIGHT", 2: "AVOID", 3: "CHANGE BRANCH", 6: "ROCKS BLOCK THE VINE", 8: "WATCH THE ROLL", 10: "PRESS H", 15: "NO MORE HELP"}
-	tutorial_text = messages.get(stage_number, "")
-	tutorial_remaining = Balance.TUTORIAL_SECONDS if tutorial_text != "" else 0.0
-
 func show_bean_tutorial() -> void:
-	if is_nightmare_mode():
+	_queue_hint("bean", "DODGE THE BEANS")
+
+func _queue_hint(key: String, text: String) -> void:
+	if tutorial_active or app_state != AppState.PLAYING or is_nightmare_mode() or not save_manager.is_first_run() or save_manager.has_seen_hint(key):
 		return
-	if tutorial_text != "DODGE THE BEANS":
-		tutorial_text = "DODGE THE BEANS"
-		tutorial_remaining = Balance.TUTORIAL_SECONDS
+	for message in text_messages:
+		if message.get("key", "") == key:
+			return
+	text_messages.append({"key": key, "text": text})
+	_pump_text_messages()
+
+func _advance_text_messages(delta: float) -> void:
+	if tutorial_remaining > 0.0:
+		var elapsed := minf(delta, tutorial_remaining)
+		tutorial_remaining = maxf(tutorial_remaining - delta, 0.0)
+		if tutorial_remaining <= 0.0:
+			tutorial_text = ""
+			hint_gap_remaining = maxf(4.0 - (delta - elapsed), 0.0)
+	else:
+		hint_gap_remaining = maxf(hint_gap_remaining - delta, 0.0)
+		level_up_remaining = maxf(level_up_remaining - delta, 0.0)
+	_pump_text_messages()
+
+func _pump_text_messages() -> void:
+	if tutorial_remaining > 0.0 or level_up_remaining > 0.0:
+		return
+	if tutorial_active or app_state not in [AppState.PLAYING, AppState.GAME_COMPLETE]:
+		return
+	for index in text_messages.size():
+		var message := text_messages[index]
+		var is_hint := message.has("key")
+		if is_hint and (hint_gap_remaining > 0.0 or app_state != AppState.PLAYING):
+			continue
+		text_messages.remove_at(index)
+		if is_hint:
+			if not save_manager.is_first_run() or save_manager.has_seen_hint(message.key):
+				_pump_text_messages()
+				return
+			save_manager.mark_hint_seen(message.key)
+			tutorial_text = message.text
+			tutorial_remaining = 2.0
+			$HUD/Tutorial.text = tutorial_text
+			$HUD/Tutorial.visible = true
+			$HUD/LevelUpCard.visible = false
+		else:
+			$HUD/LevelUpCard.text = message.text
+			level_up_remaining = 1.6
+			$HUD/LevelUpCard.visible = true
+			$HUD/Tutorial.visible = false
+		return
+
+func _update_encounter_hints() -> void:
+	if tutorial_active or app_state != AppState.PLAYING or not save_manager.is_first_run():
+		return
+	var stage_number := stages.stage_for_y(player.global_position.y)
+	if stage_number >= Balance.TIME_WINGS_STAGE:
+		_queue_hint("time_wings", "TIME WINGS READY")
+	if stage_number >= Balance.FIRE_WINGS_STAGE:
+		_queue_hint("fire_wings", "FIRE WINGS READY")
+	var screen := Rect2(Vector2.ZERO, get_viewport_rect().size)
+	for hazard in rocks.hazards:
+		if not is_instance_valid(hazard) or not hazard.is_visible_in_tree():
+			continue
+		var on_screen := false
+		for center in hazard.collision_centers():
+			var point: Vector2 = hazard.get_global_transform_with_canvas() * hazard.to_local(center)
+			if screen.intersects(Rect2(point - Vector2.ONE * hazard.collision_radius(), Vector2.ONE * hazard.collision_radius() * 2.0)):
+				on_screen = true
+		if not on_screen:
+			continue
+		if hazard.kind == "R":
+			_queue_hint("roll", "WATCH THE ROLL")
+		elif hazard.kind == "WALL":
+			_queue_hint("wall", "SWITCH BRANCH")
+		else:
+			_queue_hint("rock", "AVOID THE ROCKS")
 
 func on_bean_hit() -> void:
 	if tutorial_active and tutorial_step == 2:
@@ -1566,9 +1625,6 @@ func _apply_impact_fx(_delta: float) -> void:
 			camera.offset = Vector2.from_angle(progress * TAU * 7.0) * (6.0 * shake_remaining / 0.20)
 		else:
 			camera.offset = Vector2.ZERO
-	var close_label := player.get_node_or_null("CloseCall") as Label
-	if close_label != null:
-		close_label.visible = close_text_remaining > 0.0 and app_state == AppState.PLAYING
 
 func _setup_hud() -> void:
 	_apply_theme()
@@ -1592,20 +1648,6 @@ void fragment() {
 	$HUD.add_child(danger_vignette)
 	danger_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	danger_vignette.visible = false
-	var close_label := Label.new()
-	close_label.name = "CloseCall"
-	close_label.text = "CLOSE!"
-	close_label.position = Vector2(-55.0, -92.0)
-	close_label.size = Vector2(110.0, 30.0)
-	close_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	close_label.theme = ui_theme
-	close_label.add_theme_font_size_override("font_size", 22)
-	close_label.add_theme_color_override("font_color", Color("ffe36b"))
-	close_label.add_theme_color_override("font_outline_color", Color("142b39"))
-	close_label.add_theme_constant_override("outline_size", 4)
-	close_label.z_index = 10
-	close_label.visible = false
-	player.add_child(close_label)
 	$HUD/Title.text = ""
 	$HUD/Hint.text = ""
 	$HUD/Dead.text = "CAUGHT\nENTER / TAP TO RETRY"
@@ -2059,6 +2101,7 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/TouchFire.position = Vector2(width - 80.0, height - 80.0)
 	$HUD/TouchFire.size = Vector2(64.0, 64.0)
 	$HUD/MetaShop.set_offsets_preset(Control.PRESET_FULL_RECT)
+	_layout_gameplay_text(Vector2(width, height))
 
 func _layout_death_panel(viewport_size: Vector2) -> void:
 	var width := viewport_size.x
@@ -2091,6 +2134,56 @@ func _layout_death_panel(viewport_size: Vector2) -> void:
 		button.size = Vector2(action_width, 48.0)
 		button.add_theme_font_size_override("font_size", 14 if width < 400.0 else 20)
 	_layout_centered_label($HUD/MenuBest, width, $HUD/Menu.position.y - 24.0, 20.0, 12.0)
+
+func _layout_gameplay_text(viewport_size: Vector2) -> void:
+	var window_size := Vector2(DisplayServer.window_get_size())
+	var pixel_scale := window_size.x / maxf(viewport_size.x, 1.0)
+	var minimum_font := ceili(28.0 * (minf(window_size.x, window_size.y) / 1080.0) / maxf(pixel_scale, 0.001))
+	var design_sizes := {"Score": 30, "RunCoins": 20, "GoldCombo": 16, "TimeWings": 16, "FireWings": 16, "TimeWingsNotice": 18, "Tutorial": 22, "LevelUpCard": 28}
+	for key: String in design_sizes:
+		var label := $HUD.get_node(key) as Label
+		label.add_theme_font_size_override("font_size", maxi(int(design_sizes[key]), minimum_font))
+	var width := viewport_size.x
+	var height := viewport_size.y
+	var right_margin := 64.0
+	var block_width := minf(maxf(width * 0.26, 200.0), width - right_margin - 12.0)
+	var top := 8.0
+	for label: Label in [$HUD/Score, $HUD/RunCoins, $HUD/GoldCombo, $HUD/TimeWings, $HUD/FireWings]:
+		label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		var font_size := label.get_theme_font_size("font_size")
+		var font := label.get_theme_font("font")
+		var text_width := font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		var lines := maxi(ceili(text_width / maxf(block_width - 32.0, 1.0)), 1)
+		var row_height := ceilf(font.get_height(font_size) * lines * 1.3) + 8.0
+		label.position = Vector2(width - right_margin - block_width, top)
+		label.size = Vector2(block_width, row_height)
+		label.pivot_offset = label.size * Vector2(1.0, 0.5)
+		top += row_height + 4.0
+	var time_label := $HUD/TimeWings as Label
+	$HUD/TimeWingsOrb.size = Vector2(24.0, 24.0)
+	$HUD/TimeWingsOrb.position = time_label.position + Vector2(-28.0, (time_label.size.y - 24.0) * 0.5)
+	$HUD/TimeWingsBar.position = time_label.position + Vector2(0.0, time_label.size.y - 5.0)
+	$HUD/TimeWingsBar.size = Vector2(block_width, 4.0)
+	var notice := $HUD/TimeWingsNotice as Label
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice.position = Vector2(width - right_margin - block_width, top)
+	notice.size = Vector2(block_width, notice.get_theme_font("font").get_height(notice.get_theme_font_size("font_size")) * 2.0 + 12.0)
+	# On narrow viewports the shared message row sits below the counter block.
+	# On wide viewports it occupies the free center, beside the counters.
+	var message_margin := block_width + right_margin + 32.0
+	var message_y := height * 0.28
+	if width - message_margin * 2.0 < 220.0:
+		message_margin = 16.0
+		message_y = maxf(message_y, notice.position.y + notice.size.y + 8.0)
+	for label: Label in [$HUD/Tutorial, $HUD/LevelUpCard]:
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		var line_height := label.get_theme_font("font").get_height(label.get_theme_font_size("font_size"))
+		_layout_centered_label(label, width, minf(message_y, height - line_height * 2.0 - 12.0), line_height * 2.0, message_margin)
+	$HUD/Mute.position = Vector2(120.0, 8.0) if app_state == AppState.PLAYING and not tutorial_active else Vector2(width - (68.0 if width < height else 128.0), 124.0)
+	_layout_run_coin_icon()
 
 func _layout_centered_label(label: Label, width: float, y: float, height: float, side_margin: float) -> void:
 	label.position = Vector2(side_margin, y)
@@ -2338,6 +2431,7 @@ func _update_dead_end_warning() -> void:
 	warning.visible = info.visible
 	if not warning.visible:
 		return
+	_queue_hint("dead_end", "SWITCH BRANCH")
 	var end_y := player.global_position.y - float(info.distance_px)
 	var end_x := stages.branch_x_at(int(info.route), end_y) + ScaleLock.vine_visual_offset(int(info.route), end_y)
 	var screen_point := player.get_canvas_transform() * Vector2(end_x, end_y)
@@ -2350,6 +2444,8 @@ func _update_dead_end_warning() -> void:
 
 func _update_hud() -> void:
 	_update_dead_end_warning()
+	_update_encounter_hints()
+	_pump_text_messages()
 	var playing := app_state == AppState.PLAYING
 	var normal_playing := playing and not tutorial_active
 	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0
@@ -2358,6 +2454,7 @@ func _update_hud() -> void:
 	var meta_visible := normal_playing or result_visible
 	$HUD/Menu.visible = app_state == AppState.MENU
 	$HUD/Pause.visible = app_state == AppState.PAUSED
+	$HUD/Pause.text = "PAUSED · TAP TO RESUME" if DisplayServer.is_touchscreen_available() else "PAUSED · ESC TO RESUME"
 	$HUD/Dead.visible = app_state == AppState.PLAYER_DEAD
 	$HUD/Dead.text = ("NEW HIGH SCORE!" if result_new_best else "SCORE %s" % _format_run_number(int(score))) if death_phase == "result" else _death_text()
 	$HUD/Dead.modulate = Color("ffd45c") if death_phase == "result" and result_new_best else Color.WHITE
@@ -2401,7 +2498,7 @@ func _update_hud() -> void:
 	$HUD/Score.text = _format_run_number(int(score))
 	$HUD/RunCoins.text = _format_run_number(run_coins)
 	_layout_run_coin_icon()
-	$HUD/Tutorial.visible = normal_playing
+	$HUD/Tutorial.visible = normal_playing and tutorial_remaining > 0.0 and level_up_remaining <= 0.0
 	$HUD/TimeWings.visible = normal_playing
 	$HUD/TimeWingsOrb.visible = normal_playing
 	$HUD/TimeWingsBar.visible = normal_playing and time_wings_remaining > 0.0
@@ -2413,7 +2510,7 @@ func _update_hud() -> void:
 	$HUD/XPStatus.visible = balance_visible
 	$HUD/XPBar.visible = balance_visible
 	$HUD/RewardToast.visible = false
-	$HUD/LevelUpCard.visible = meta_visible and level_up_remaining > 0.0
+	$HUD/LevelUpCard.visible = meta_visible and level_up_remaining > 0.0 and tutorial_remaining <= 0.0
 	var death_visible := app_state == AppState.PLAYER_DEAD and not tutorial_active
 	var continue_visible := death_visible and death_phase == "continue"
 	var run_result_visible := death_visible and death_phase == "result"
@@ -2448,13 +2545,13 @@ func _update_hud() -> void:
 	_refresh_sound_icon()
 	$HUD/StageBanner.text = stages.stage_banner if stages.stage_banner_remaining > 0.0 and app_state == AppState.PLAYING else ""
 	$HUD/StageCounter.text = "STAGE %d" % stages.stage_for_y(player.global_position.y)
-	var route_hint_visible := tutorial_text != "CHANGE BRANCH" or stages.branch_targets_visible(player.global_position.y, get_viewport_rect().size.y)
-	$HUD/Tutorial.text = tutorial_text if tutorial_remaining > 0.0 and app_state == AppState.PLAYING and route_hint_visible else ""
+	$HUD/Tutorial.text = tutorial_text if tutorial_remaining > 0.0 else ""
 	$HUD/TimeWings.text = _time_wings_status()
 	$HUD/TimeWingsNotice.text = time_wings_notice
 	$HUD/TimeWingsBar.max_value = Balance.TIME_WINGS_SECONDS
 	$HUD/TimeWingsBar.value = time_wings_remaining
 	$HUD/FireWings.text = _fire_wings_status()
+	_layout_gameplay_text(get_viewport_rect().size)
 	_update_lives_hud()
 	var meta := economy.snapshot()
 	$HUD/GoldStatus.text = "GOLD %d" % meta.gold
@@ -2491,8 +2588,8 @@ func _format_run_number(value: int) -> String:
 	return result
 
 func _on_level_up(new_level: int, gold_reward: int) -> void:
-	level_up_remaining = 2.4
-	$HUD/LevelUpCard.text = "LEVEL UP · LV %d · +%d GOLD" % [new_level, gold_reward]
+	text_messages.append({"text": "LEVEL %d · +%d GOLD" % [new_level, gold_reward]})
+	_pump_text_messages()
 
 func _death_text() -> String:
 	match death_cause:
@@ -2505,23 +2602,25 @@ func _death_text() -> String:
 
 func _time_wings_status() -> String:
 	var stage_number := stages.stage_for_y(player.global_position.y)
+	var prefix := "" if DisplayServer.is_touchscreen_available() else "F "
 	if stage_number < Balance.TIME_WINGS_STAGE:
-		return "F · LOCKED"
+		return prefix + "TIME LOCKED"
 	if time_wings_remaining > 0.0:
-		return "F · ACTIVE %.1fs" % time_wings_remaining
+		return prefix + "TIME %.1f" % time_wings_remaining
 	if time_wings_used_stage.has(stage_number):
-		return "F · RECHARGING"
-	return "F · READY"
+		return prefix + "TIME USED"
+	return prefix + "TIME READY"
 
 func _fire_wings_status() -> String:
 	var stage_number := stages.stage_for_y(player.global_position.y)
+	var prefix := "" if DisplayServer.is_touchscreen_available() else "H "
 	if stage_number < Balance.FIRE_WINGS_STAGE and debug_sandbox != "rocks":
-		return "H · FIRE WINGS LOCKED"
+		return prefix + "FIRE LOCKED"
 	if fire_wings_remaining > 0.0:
-		return "H · FIRE WINGS ACTIVE %.1fs" % fire_wings_remaining
+		return prefix + "FIRE %.1f" % fire_wings_remaining
 	if fire_wings_used_stage.has(stage_number):
-		return "H · FIRE WINGS USED"
-	return "H · FIRE WINGS READY"
+		return prefix + "FIRE USED"
+	return prefix + "FIRE READY"
 
 func _update_time_wings_orb() -> void:
 	var orb := $HUD/TimeWingsOrb as TextureRect

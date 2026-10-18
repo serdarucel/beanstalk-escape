@@ -109,6 +109,30 @@ func replay_snapshot() -> Dictionary:
 		load_profile()
 	return profile.get("replay", _default_replay()).duplicate(true)
 
+func is_first_run() -> bool:
+	if profile.is_empty():
+		load_profile()
+	if int(profile.get("best_score", 0)) > 0 or not profile.get("leaderboard_local", []).is_empty():
+		return false
+	for record: Dictionary in replay_snapshot().records.values():
+		if int(record.get("completions", 0)) > 0:
+			return false
+	return true
+
+func has_seen_hint(key: String) -> bool:
+	if profile.is_empty():
+		load_profile()
+	return profile.get("hints_seen", []).has(key)
+
+func mark_hint_seen(key: String) -> bool:
+	if profile.is_empty():
+		load_profile()
+	var seen: Array = profile.get("hints_seen", []).duplicate()
+	if not seen.has(key):
+		seen.append(key)
+	profile["hints_seen"] = seen
+	return _write_profile()
+
 func meta_systems_snapshot() -> Dictionary:
 	if profile.is_empty():
 		load_profile()
@@ -323,6 +347,7 @@ func _default_profile() -> Dictionary:
 	return {
 		"version": SAVE_VERSION,
 		"best_score": 0,
+		"hints_seen": [],
 		"leaderboard_local": [],
 		"player_name": "",
 		"meta": {"gold": 0, "xp": 0, "level": 1, "hair_refund_done": true, "emblem_refund_done": true, "trail_refund_done": true, "save_seq": 0},
@@ -433,6 +458,11 @@ func _on_bridge_profile_loaded(success: bool, value: Variant) -> void:
 func _sanitize_profile(value: Dictionary) -> Dictionary:
 	var result := _default_profile()
 	result.best_score = maxi(int(value.get("best_score", 0)), 0)
+	var seen: Variant = value.get("hints_seen", [])
+	if seen is Array:
+		for key in seen:
+			if key in ["bean", "rock", "roll", "wall", "dead_end", "time_wings", "fire_wings"] and not result.hints_seen.has(key):
+				result.hints_seen.append(key)
 	result.player_name = str(value.get("player_name", "")).strip_edges().left(48)
 	var local_scores: Variant = value.get("leaderboard_local", [])
 	if local_scores is Array:
