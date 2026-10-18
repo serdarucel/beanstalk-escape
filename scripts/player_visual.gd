@@ -237,13 +237,23 @@ func _update_explorer_mode(player: PlayerController, app_state: int, delta: floa
 			_explorer_respawning = false
 			mode = "climb"
 			_animate_explorer("climb", 0.0)
+	elif player.is_airborne():
+		mode = "jump"
+		var frames := int(_explorer_meta["anims"]["jump"]["frames"])
+		var progress := clampf(1.0 - player.action_remaining / maxf(player.action_total, 0.00001), 0.0, 1.0)
+		_set_explorer_frame("jump", int(progress * float(frames - 1)))
+	elif player.is_hugging():
+		mode = "slide"
+		var frames := int(_explorer_meta["anims"]["slide"]["frames"])
+		var progress := clampf(1.0 - player.action_remaining / maxf(player.action_total, 0.00001), 0.0, 1.0)
+		_set_explorer_frame("slide", int(progress * float(frames - 1)))
 	elif player.time_wings_active or player.fire_wings_active:
 		mode = "fly"
 		_animate_explorer("fly", delta)
 	else:
 		mode = "climb"
 		_animate_explorer("climb", delta)
-	# jump/slide are loaded for future manual jump/slide support states.
+	# Manual jump/slide follow action progress; lane transfers and hit keep priority.
 	_was_transferring = transferring
 	_update_transfer_trails(transferring, delta)
 
