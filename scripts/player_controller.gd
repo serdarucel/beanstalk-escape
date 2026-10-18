@@ -123,6 +123,11 @@ func is_airborne() -> bool:
 func is_hugging() -> bool:
 	return action_state == ActionState.HUG
 
+func occupies_route(route: int) -> bool:
+	if movement_mode == MovementMode.TRANSITION:
+		return route == transition_from or route == transition_to
+	return active_branch == route
+
 func cancel_action() -> void:
 	_remove_action_visual()
 	action_state = ActionState.NONE

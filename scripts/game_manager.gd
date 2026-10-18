@@ -140,6 +140,7 @@ var death_cause := DeathCause.NONE
 @onready var stages: StageManager = $StageManager
 @onready var beans: BeanSpawner = $BeanSpawner
 @onready var rocks: RockManager = $RockManager
+var action_hazards = preload("res://scripts/action_hazard_manager.gd").new()
 @onready var audio: BeanstalkAudio = $Audio
 @onready var storm: StormMechanics = $StormMechanics
 @onready var platform_services: Node = get_node("/root/PlatformServices")
@@ -293,6 +294,9 @@ func _ready() -> void:
 	add_child(golds)
 	golds.setup(player, stages, economy, audio)
 	rocks.setup(player, stages)
+	action_hazards.name = "ActionHazardManager"
+	add_child(action_hazards)
+	action_hazards.setup(player, stages)
 	stages.prototype_completed.connect(_on_prototype_completed)
 	stages.stage_completed.connect(_on_stage_completed)
 	_ensure_actions()
@@ -562,6 +566,7 @@ func _debug_evidence_stage(stage_number: int) -> void:
 	spider.reset_run(player.global_position + Vector2(0, _spider_start_gap(stage_number)))
 	player._sync_stage_mode()
 	stages.update_progress(player.global_position.y)
+	action_hazards.sync_after_player_teleport()
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if not event.pressed:
@@ -628,6 +633,7 @@ func restart() -> void:
 		spider_body.visible = true
 	stages.reset_run()
 	golds.reset_run()
+	action_hazards.reset_run()
 	golds.visible = true
 	state = State.PLAYING
 	app_state = AppState.PLAYING
@@ -780,6 +786,7 @@ func _finish_intro() -> void:
 	intro_t = 0.0
 	# Rebuild the exact normal run start so watching and skipping are identical.
 	player.reset_run(Vector2.ZERO)
+	action_hazards.reset_run()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0.0, _spider_start_gap(1)))
 	beans.reset_run()
@@ -848,6 +855,7 @@ func restart_stage() -> void:
 	danger_vignette_closed_remaining = 0.0
 	_apply_impact_fx(0.0)
 	player.reset_run(Vector2(0, start_y))
+	action_hazards.reset_run()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0, start_y + _spider_start_gap(stage_number)))
 	_begin_danger(true)
@@ -1169,6 +1177,7 @@ func _respawn_at_continue_checkpoint() -> void:
 	var safe_stage := stages.stage_for_y(safe_position.y)
 	spider.reset_run(safe_position + Vector2(0, _spider_start_gap(safe_stage)))
 	rocks.sync_after_player_teleport()
+	action_hazards.sync_after_player_teleport()
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 	_update_hud()
 	_publish_readonly_web_state()
@@ -1459,6 +1468,7 @@ func _skip_stage_after_reward(stage_number: int) -> void:
 	stages.current_stage = stage_number + 1
 	var next_y := stages.stage_bottom_y(stage_number + 1)
 	player.reset_run(Vector2(0, next_y))
+	action_hazards.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0, next_y + _spider_start_gap(stage_number + 1)))
 	_begin_danger(true)
@@ -1521,6 +1531,7 @@ func _enter_tutorial_arena() -> void:
 			break
 	var practice_y := -(stages.stage_start_height(stage_number) + stages.stage_length(stage_number) * practice_progress)
 	player.reset_run(Vector2(stages.branch_x_at(1, practice_y), practice_y))
+	action_hazards.reset_run()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(player.global_position + Vector2(0.0, 900.0))
 	player.set_physics_process(true)
@@ -2930,6 +2941,8 @@ func _readonly_state_snapshot() -> Dictionary:
 		"time_wings": {"unlocked": stages.stage_for_y(player.global_position.y) >= Balance.TIME_WINGS_STAGE, "active": time_wings_remaining > 0.0, "remaining": time_wings_remaining, "started_remaining": time_wings_started_remaining, "used": time_wings_used_stage.has(stages.stage_for_y(player.global_position.y)), "notice": time_wings_notice, "slow_scale": Balance.TIME_WINGS_SLOW_SCALE},
 		"fire_wings": {"unlocked": stages.stage_for_y(player.global_position.y) >= Balance.FIRE_WINGS_STAGE or debug_sandbox == "rocks", "active": fire_wings_remaining > 0.0, "remaining": fire_wings_remaining, "started_remaining": fire_wings_started_remaining, "used": fire_wings_used_stage.has(stages.stage_for_y(player.global_position.y))},
 		"rocks": rocks.snapshot(),
+		"action_hazards": action_hazards.snapshot(),
+		"player_action": "AIRBORNE" if player.is_airborne() else ("HUG" if player.is_hugging() else "NONE"),
 		"audio_events": audio.audio_event_snapshot(),
 		"gold_fx": golds.feedback_state(),
 		"gold": state_gold,
@@ -3010,6 +3023,7 @@ func _start_debug_stage(stage_number: int) -> void:
 	stages.ensure_stage(stage_number + Balance.STAGES_AHEAD)
 	var start_y := stages.stage_bottom_y(stage_number)
 	player.reset_run(Vector2(0.0, start_y))
+	action_hazards.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0.0, start_y + _spider_start_gap(stage_number)))
 	_begin_danger(true)
