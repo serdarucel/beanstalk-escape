@@ -122,7 +122,7 @@ var fire_wings_started_remaining := 0.0
 var fire_wings_used_stage := {}
 var tutorial_remaining := 0.0
 var tutorial_text := ""
-var touch_actions := {}
+var touch_gestures := {}
 var dead_restart_delay := 0.0
 var confirm_pending := false
 var ui_theme: Theme
@@ -331,6 +331,11 @@ func _physics_process(delta: float) -> void:
 	_publish_readonly_web_state()
 
 func _input(event: InputEvent) -> void:
+	# Keep tracking a finger even when it drags over a GUI control.
+	if event is InputEventScreenDrag:
+		_handle_screen_drag(event)
+	elif event is InputEventScreenTouch and not event.pressed:
+		touch_gestures.erase(event.index)
 	if app_state == AppState.PLAYER_DEAD and death_phase == "result" and not leaderboard_visible:
 		if (event is InputEventKey and event.pressed and not event.echo) or (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed):
 			_show_leaderboard()
@@ -431,6 +436,9 @@ func _debug_evidence_stage(stage_number: int) -> void:
 	stages.update_progress(player.global_position.y)
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
+	if not event.pressed:
+		touch_gestures.erase(event.index)
+		return
 	if event.pressed and app_state == AppState.INTRO:
 		_finish_intro()
 		return
@@ -442,23 +450,26 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if event.pressed:
 		var wings_button := get_node_or_null("HUD/TouchWings") as Button
 		if wings_button != null and wings_button.visible and Rect2(wings_button.position, wings_button.size).has_point(event.position):
-			touch_actions[event.index] = "time_wings"
+			touch_gestures[event.index] = {"origin": event.position, "consumed": true}
 			dispatch_command("time_wings", "mobile")
 			return
 		var fire_button := get_node_or_null("HUD/TouchFire") as Button
 		if fire_button != null and fire_button.visible and Rect2(fire_button.position, fire_button.size).has_point(event.position):
-			touch_actions[event.index] = "fire_wings"
+			touch_gestures[event.index] = {"origin": event.position, "consumed": true}
 			dispatch_command("fire_wings", "mobile")
 			return
-		var action := "move_left" if event.position.x < 172.0 else "move_right"
-		touch_actions[event.index] = action
-		Input.action_press(action)
-		dispatch_command(action, "mobile")
-	elif touch_actions.has(event.index):
-		var released_action: String = touch_actions[event.index]
-		touch_actions.erase(event.index)
-		if released_action not in ["time_wings", "fire_wings"] and not touch_actions.values().has(released_action):
-			Input.action_release(released_action)
+		touch_gestures[event.index] = {"origin": event.position, "consumed": false}
+
+func _handle_screen_drag(event: InputEventScreenDrag) -> void:
+	if app_state != AppState.PLAYING or not touch_gestures.has(event.index):
+		return
+	var gesture: Dictionary = touch_gestures[event.index]
+	if gesture.consumed:
+		return
+	var displacement: Vector2 = event.position - Vector2(gesture.origin)
+	if absf(displacement.x) >= 36.0 and absf(displacement.x) > absf(displacement.y):
+		gesture.consumed = true
+		dispatch_command("move_left" if displacement.x < 0.0 else "move_right", "mobile")
 
 func restart() -> void:
 	economy.begin_run()
@@ -1814,10 +1825,8 @@ void fragment() {
 	$HUD.add_child(danger_overlay)
 	danger_overlay.game = self
 	_add_mute_button()
-	_add_touch_button("TouchLeft", Rect2(36, 392, 136, 132), "LEFT", "move_left")
-	_add_touch_button("TouchRight", Rect2(180, 392, 136, 132), "RIGHT", "move_right")
-	_add_touch_button("TouchWings", Rect2(640, 392, 145, 132), "TIME", "time_wings")
-	_add_touch_button("TouchFire", Rect2(795, 392, 145, 132), "FIRE", "fire_wings")
+	_add_touch_button("TouchWings", Rect2(880, 386, 64, 64), "TIME", "time_wings")
+	_add_touch_button("TouchFire", Rect2(880, 460, 64, 64), "FIRE", "fire_wings")
 	meta_ui = MetaShopUI.new()
 	meta_ui.name = "MetaShop"
 	meta_ui.visible = false
@@ -2045,15 +2054,10 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/CompleteNewRun.size = Vector2(complete_width, 48.0 if compact else 52.0)
 	$HUD/CompleteMenu.position = Vector2(complete_start + complete_width + 6.0, complete_y)
 	$HUD/CompleteMenu.size = Vector2(complete_width, 48.0 if compact else 52.0)
-	var touch_y := height - 148.0
-	$HUD/TouchLeft.position = Vector2(18.0, touch_y)
-	$HUD/TouchLeft.size = Vector2(104.0, 128.0)
-	$HUD/TouchRight.position = Vector2(132.0, touch_y)
-	$HUD/TouchRight.size = Vector2(104.0, 128.0)
-	$HUD/TouchWings.position = Vector2(width - 292.0, touch_y)
-	$HUD/TouchWings.size = Vector2(maxf(132.0, Balance.TOUCH_BUTTON_MIN_PX), maxf(128.0, Balance.TOUCH_BUTTON_MIN_PX))
-	$HUD/TouchFire.position = Vector2(width - 150.0, touch_y)
-	$HUD/TouchFire.size = Vector2(132.0, 128.0)
+	$HUD/TouchWings.position = Vector2(width - 80.0, height - 154.0)
+	$HUD/TouchWings.size = Vector2(64.0, 64.0)
+	$HUD/TouchFire.position = Vector2(width - 80.0, height - 80.0)
+	$HUD/TouchFire.size = Vector2(64.0, 64.0)
 	$HUD/MetaShop.set_offsets_preset(Control.PRESET_FULL_RECT)
 
 func _layout_death_panel(viewport_size: Vector2) -> void:
@@ -2271,30 +2275,33 @@ func _add_touch_button(name: String, rect: Rect2, text: String, action: String) 
 	button.name = name
 	button.theme = ui_theme
 	button.position = rect.position
-	button.size = Vector2(maxf(rect.size.x, Balance.TOUCH_BUTTON_MIN_PX), maxf(rect.size.y, Balance.TOUCH_BUTTON_MIN_PX))
+	button.custom_minimum_size = Vector2(64.0, 64.0)
+	button.size = rect.size
 	button.text = text
+	button.add_theme_font_size_override("font_size", 15)
+	button.modulate.a = 0.6
+	button.focus_mode = Control.FOCUS_NONE
+	for state_name in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("20352c") if state_name != "pressed" else Color("41634c")
+		style.set_corner_radius_all(16)
+		button.add_theme_stylebox_override(state_name, style)
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	button.visible = DisplayServer.is_touchscreen_available()
 	$HUD.add_child(button)
-	button.button_down.connect(_on_touch_action_down.bind(action))
-	button.button_up.connect(_on_touch_action_up.bind(action))
-	button.pressed.connect(_request_confirm)
-
-func _on_touch_action_down(action: String) -> void:
-	if action in ["time_wings", "fire_wings"]:
-		dispatch_command(action, "mobile")
-	else:
-		Input.action_press(action)
-		player.request_branch_direction(-1 if action == "move_left" else 1)
-
-func _on_touch_action_up(action: String) -> void:
-	if action not in ["time_wings", "fire_wings"]:
-		Input.action_release(action)
+	button.gui_input.connect(func(event: InputEvent):
+		if event is InputEventScreenTouch:
+			button.accept_event()
+			if event.pressed:
+				touch_gestures[event.index] = {"origin": event.position, "consumed": true}
+				dispatch_command(action, "mobile")
+		elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			dispatch_command(action, "mobile"))
 
 func _clear_direction_inputs() -> void:
 	Input.action_release("move_left")
 	Input.action_release("move_right")
-	touch_actions.clear()
+	touch_gestures.clear()
 
 func _update_lives_hud() -> void:
 	var lives := $HUD/Lives as Control
@@ -2436,8 +2443,6 @@ func _update_hud() -> void:
 	$HUD/GetMoreGold.visible = app_state == AppState.MENU and platform_services.is_rewarded_supported()
 	$HUD/GetMoreGold.text = "GET %d GOLD (AD)" % economy.value("get_more_gold_reward")
 	$HUD/RemoveAds.visible = app_state == AppState.MENU and platform_services.is_payments_supported() and not platform_services.remove_ads_owned
-	$HUD/TouchLeft.visible = normal_playing and DisplayServer.is_touchscreen_available()
-	$HUD/TouchRight.visible = normal_playing and DisplayServer.is_touchscreen_available()
 	$HUD/TouchWings.visible = normal_playing and DisplayServer.is_touchscreen_available()
 	$HUD/TouchFire.visible = normal_playing and DisplayServer.is_touchscreen_available()
 	_refresh_sound_icon()
