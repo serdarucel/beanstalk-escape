@@ -8,6 +8,8 @@ enum ActionState { NONE, AIRBORNE, HUG }
 var action_state := ActionState.NONE
 var action_remaining := 0.0
 var action_total := 0.0
+var jump_time_scale := 1.0
+var jump_visual_scale := Balance.JUMP_VISUAL_SCALE
 var _action_visual_scale := 1.0
 var _action_visual_brightness := 1.0
 
@@ -109,7 +111,7 @@ func _update_movement(delta: float) -> void:
 func request_jump() -> bool:
 	if flying or action_state == ActionState.AIRBORNE or knockback_remaining > 0.0 or stun_remaining > 0.0:
 		return false
-	_start_action(ActionState.AIRBORNE, maxf(Balance.JUMP_AIR_SECONDS_MIN, Balance.JUMP_AIR_SECONDS_BASE / sqrt(maxf(speed_scale, 0.00001))))
+	_start_action(ActionState.AIRBORNE, maxf(Balance.JUMP_AIR_SECONDS_MIN, Balance.JUMP_AIR_SECONDS_BASE / sqrt(maxf(speed_scale, 0.00001))) * jump_time_scale)
 	return true
 
 func request_hug() -> bool:
@@ -158,7 +160,7 @@ func _apply_action_visual() -> void:
 		_action_visual_scale = lerpf(1.0, 1.2, flight_height / 70.0)
 	elif is_airborne():
 		var progress := 1.0 - action_remaining / action_total
-		_action_visual_scale = lerpf(1.0, Balance.JUMP_VISUAL_SCALE, sin(PI * progress))
+		_action_visual_scale = lerpf(1.0, jump_visual_scale, sin(PI * progress))
 	elif is_hugging():
 		var blend := clampf(minf(action_total - action_remaining, action_remaining) / 0.08, 0.0, 1.0)
 		_action_visual_scale = lerpf(1.0, Balance.HUG_VISUAL_SCALE, blend)
@@ -413,6 +415,8 @@ func apply_bean_hit() -> void:
 	knockback_speed = Balance.BEAN_KNOCKBACK_SPEED
 
 func apply_rock_hit(_hit_id: String) -> void:
+	if jump_time_scale > 1.0 and is_airborne() and get_parent().sandals_clear_rock(_hit_id):
+		return
 	if flying or float(get_parent().hit_invulnerability_remaining) > 0.0:
 		return
 	cancel_action()

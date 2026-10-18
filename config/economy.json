@@ -26,6 +26,7 @@
   "interstitial_completed_stage_interval": 2,
   "interstitial_min_delay_seconds": 90,
   "lives_per_run": 3,
+  "leaf_shield_price": 30,
   "hit_invulnerability_seconds": 1.5,
   "ad_revive_lives": 1,
   "ad_revive_max_per_stage": 0,

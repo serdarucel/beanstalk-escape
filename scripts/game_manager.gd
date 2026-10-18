@@ -170,6 +170,9 @@ var tutorial_text := ""
 var text_messages: Array[Dictionary] = []
 var hint_gap_remaining := 0.0
 var touch_gestures := {}
+var last_shield_tap_msec := -1000
+var sandal_rock_cleared := false
+var shield_shop_button: Button
 var dead_restart_delay := 0.0
 var confirm_pending := false
 var ui_theme: Theme
@@ -203,7 +206,13 @@ var continue_used_this_run := false
 var continue_checkpoint := {}
 var max_lives := 3
 var current_lives := 3
-var hit_invulnerability_remaining := 0.0
+var _hit_invulnerability_remaining := 0.0
+var hit_invulnerability_remaining: float:
+	get:
+		# Existing player hit methods read this before applying knockback.
+		return maxf(_hit_invulnerability_remaining, 0.001 if powerups.is_active("SHIELD") else 0.0)
+	set(value):
+		_hit_invulnerability_remaining = value
 var danger_remaining := 0.0
 var danger_vignette: ColorRect
 var danger_vignette_alpha := 0.0
@@ -350,6 +359,8 @@ func _sky_texture_middle_color(texture: Texture2D) -> Color:
 
 func _process(_delta: float) -> void:
 	_update_sky_clear_color()
+	if app_state == AppState.SHOP and meta_ui != null:
+		_refresh_shield_shop()
 
 func _update_sky_clear_color() -> void:
 	if get_tree().root.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
@@ -448,7 +459,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenDrag:
 		_handle_screen_drag(event)
 	elif event is InputEventScreenTouch and not event.pressed:
-		touch_gestures.erase(event.index)
+		_finish_shield_tap(event)
 	if app_state == AppState.PLAYER_DEAD and death_phase == "result" and not leaderboard_visible:
 		if (event is InputEventKey and event.pressed and not event.echo) or (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed):
 			_show_leaderboard()
@@ -458,6 +469,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if app_state == AppState.PLAYING and event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_E or event.keycode == KEY_E:
+			activate_stock_shield()
+			get_viewport().set_input_as_handled()
+			return
 		if event.is_action_pressed("jump"):
 			dispatch_command("jump", "keyboard")
 			get_viewport().set_input_as_handled()
@@ -572,7 +587,7 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if app_state != AppState.PLAYING:
 		return
 	if event.pressed:
-		touch_gestures[event.index] = {"origin": event.position, "consumed": false}
+		touch_gestures[event.index] = {"origin": event.position, "consumed": false, "started": Time.get_ticks_msec()}
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	if app_state != AppState.PLAYING or not touch_gestures.has(event.index):
@@ -587,6 +602,22 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	elif absf(displacement.y) >= Balance.SWIPE_MIN_PX and absf(displacement.y) > absf(displacement.x):
 		gesture.consumed = true
 		dispatch_command("jump" if displacement.y < 0.0 else "hug", "mobile")
+	if displacement.length() > 16.0:
+		gesture["not_tap"] = true
+		last_shield_tap_msec = -1000
+
+func _finish_shield_tap(event: InputEventScreenTouch) -> void:
+	var gesture: Dictionary = touch_gestures.get(event.index, {})
+	touch_gestures.erase(event.index)
+	var now := Time.get_ticks_msec()
+	if app_state != AppState.PLAYING or gesture.is_empty() or bool(gesture.get("consumed", false)) or bool(gesture.get("not_tap", false)) or now - int(gesture.get("started", 0)) > 200 or event.position.distance_to(Vector2(gesture.origin)) > 16.0:
+		last_shield_tap_msec = -1000
+		return
+	if now - last_shield_tap_msec <= 300:
+		activate_stock_shield()
+		last_shield_tap_msec = -1000
+	else:
+		last_shield_tap_msec = now
 
 func restart() -> void:
 	tutorial_active = false
@@ -999,7 +1030,7 @@ func _die(cause: DeathCause = DeathCause.CAUGHT) -> void:
 		_retry_onboarding()
 		return
 	if not tutorial_active:
-		if hit_invulnerability_remaining > 0.0:
+		if _hit_invulnerability_remaining > 0.0:
 			_respawn_at_continue_checkpoint()
 			return
 		_lose_life(cause, true)
@@ -1007,7 +1038,7 @@ func _die(cause: DeathCause = DeathCause.CAUGHT) -> void:
 	_enter_player_dead(cause)
 
 func _lose_life(cause: DeathCause, respawn_from_checkpoint: bool) -> bool:
-	if tutorial_active or app_state != AppState.PLAYING or hit_invulnerability_remaining > 0.0 or current_lives <= 0:
+	if tutorial_active or app_state != AppState.PLAYING or _hit_invulnerability_remaining > 0.0 or current_lives <= 0:
 		return false
 	current_lives -= 1
 	golds.reset_combo()
@@ -1182,9 +1213,9 @@ func _continue_route_has_clearance(world_y: float, route: int, clearance: float)
 	return true
 
 func _update_hit_invulnerability(delta: float) -> void:
-	if app_state == AppState.PLAYING and hit_invulnerability_remaining > 0.0:
-		hit_invulnerability_remaining = maxf(hit_invulnerability_remaining - delta, 0.0)
-		player.modulate.a = 0.60 if int(hit_invulnerability_remaining * 8.0) % 2 == 0 else 1.0
+	if app_state == AppState.PLAYING and _hit_invulnerability_remaining > 0.0:
+		_hit_invulnerability_remaining = maxf(_hit_invulnerability_remaining - delta, 0.0)
+		player.modulate.a = 0.60 if int(_hit_invulnerability_remaining * 8.0) % 2 == 0 else 1.0
 	else:
 		player.modulate.a = 1.0
 
@@ -1311,7 +1342,54 @@ func _refresh_sound_icon() -> void:
 func _show_shop() -> void:
 	app_state = AppState.SHOP
 	meta_ui.open_shop()
+	_refresh_shield_shop()
 	_update_hud()
+
+func shield_stock() -> int:
+	return maxi(int(save_manager.profile.get("purchases", {}).get("leaf_shield_stock", 0)), 0)
+
+func set_shield_stock(count: int) -> bool:
+	# Purchases is an extensible dictionary preserved by SaveManager sanitation.
+	var purchases: Dictionary = save_manager.profile.get("purchases", {}).duplicate(true)
+	purchases["leaf_shield_stock"] = maxi(count, 0)
+	save_manager.profile["purchases"] = purchases
+	return save_manager.write_meta(economy.snapshot())
+
+func buy_leaf_shield() -> bool:
+	var price := int(economy.config.get("leaf_shield_price", 30))
+	if economy.gold < price:
+		return false
+	var previous_gold := economy.gold
+	var previous_stock := shield_stock()
+	economy.gold -= price
+	if not set_shield_stock(previous_stock + 1):
+		economy.gold = previous_gold
+		save_manager.profile.purchases["leaf_shield_stock"] = previous_stock
+		return false
+	economy.changed.emit(economy.snapshot())
+	meta_ui.refresh()
+	_refresh_shield_shop()
+	return true
+
+func activate_stock_shield() -> bool:
+	if app_state != AppState.PLAYING or shield_stock() <= 0 or powerups.is_active("SHIELD"):
+		return false
+	var previous_stock := shield_stock()
+	if not set_shield_stock(previous_stock - 1):
+		save_manager.profile.purchases["leaf_shield_stock"] = previous_stock
+		return false
+	powerups.activate("SHIELD")
+	return true
+
+func _refresh_shield_shop() -> void:
+	if not is_instance_valid(shield_shop_button) or shield_shop_button.is_queued_for_deletion():
+		shield_shop_button = Button.new()
+		shield_shop_button.name = "LeafShieldPurchase"
+		shield_shop_button.custom_minimum_size = Vector2(210, 72)
+		shield_shop_button.pressed.connect(buy_leaf_shield)
+		meta_ui.grid.add_child(shield_shop_button)
+	shield_shop_button.text = "LEAF SHIELD — %d GOLD\nSTOCK %d" % [int(economy.config.get("leaf_shield_price", 30)), shield_stock()]
+	shield_shop_button.disabled = economy.gold < int(economy.config.get("leaf_shield_price", 30))
 
 func _show_character_select() -> void:
 	app_state = AppState.CHARACTER_SELECT
@@ -1683,10 +1761,55 @@ func on_bean_hit() -> void:
 	_on_danger_obstacle_hit()
 
 func on_rock_hit() -> void:
+	if sandal_rock_cleared:
+		sandal_rock_cleared = false
+		return
 	_on_danger_obstacle_hit()
+
+func sandals_clear_rock(hit_id: String) -> bool:
+	sandal_rock_cleared = false
+	if not powerups.is_active("SANDAL") or not player.is_airborne():
+		return false
+	for hazard in rocks.hazards:
+		if hazard.hazard_id == hit_id and hazard.kind in ["S", "R"]:
+			sandal_rock_cleared = true
+			return true
+	return false
+
+func _clear_shield_obstacles() -> void:
+	var y := player.global_position.y
+	# Managers can be iterating these arrays during this callback. Mark contacts
+	# immediately and defer array removal until that physics traversal completes.
+	for bean in get_tree().get_nodes_in_group("beans"):
+		if bean.active and bean.global_position.y >= y - 600.0 and bean.global_position.y <= y + Balance.BEAN_HIT_RADIUS:
+			bean.consume()
+	for hazard in rocks.hazards:
+		if hazard.global_position.y >= y - 600.0 and hazard.global_position.y <= y + hazard.collision_radius() + ScaleLock.COLLIDER_WIDTH:
+			rocks.hit_ids[hazard.hazard_id] = true
+			hazard.hide()
+			_retire_shield_rock.call_deferred(hazard)
+	for hazard in action_hazards.hazards:
+		if hazard.global_position.y >= y - 600.0 and hazard.global_position.y <= y + 18.0:
+			action_hazards.cleared_ids[hazard.hazard_id] = true
+			hazard.hide()
+			_retire_shield_action.call_deferred(hazard)
+
+func _retire_shield_rock(hazard: RockHazard) -> void:
+	rocks.hazards.erase(hazard)
+	if is_instance_valid(hazard):
+		hazard.queue_free()
+
+func _retire_shield_action(hazard: Node2D) -> void:
+	action_hazards.hazards.erase(hazard)
+	if is_instance_valid(hazard):
+		hazard.queue_free()
 
 func _on_danger_obstacle_hit() -> void:
 	if player.is_flying():
+		return
+	if app_state == AppState.PLAYING and _hit_invulnerability_remaining <= 0.0 and powerups.consume_shield():
+		_clear_shield_obstacles()
+		spider.retreat_from_danger(_spider_start_gap(stages.stage_for_y(player.global_position.y)))
 		return
 	if tutorial_active:
 		_retry_onboarding()

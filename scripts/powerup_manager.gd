@@ -5,6 +5,8 @@ var types: Dictionary = {
 	"MAGNET": {"id": "MAGNET", "duration": 10.0, "color": Color("68e58b"), "label": "MAGNET LEAF"},
 	"DOUBLE": {"id": "DOUBLE", "duration": 10.0, "color": Color("ffd260"), "label": "GOLDEN BEAN ×2"},
 	"WINGS": {"id": "WINGS", "duration": 8.0, "color": Color("ffab62"), "label": "WING FLIGHT"},
+	"SANDAL": {"id": "SANDAL", "duration": 10.0, "color": Color("87ee63"), "label": "SPRING SANDALS"},
+	"SHIELD": {"id": "SHIELD", "duration": 30.0, "color": Color("52df7b"), "label": "LEAF SHIELD"},
 }
 var active: Dictionary = {}
 var items: Array[Dictionary] = []
@@ -20,6 +22,8 @@ var textures: Dictionary = {}
 var visual_time := 0.0
 var flight_serial := 0
 var air_coins: Array[GoldCollectible] = []
+var shield_burst_remaining := 0.0
+var shield_burst_center := Vector2.ZERO
 
 func setup(target: PlayerController, stage_manager: StageManager, manager: GameManager) -> void:
 	player = target
@@ -50,6 +54,8 @@ func register_type(id: String, data: Dictionary) -> void:
 func reset_run() -> void:
 	clear_air_coins()
 	active.clear()
+	shield_burst_remaining = 0.0
+	_sync_sandals()
 	items.clear()
 	spawned = 0
 	collected = 0
@@ -66,9 +72,24 @@ func is_active(id: String) -> bool:
 func activate(id: String) -> void:
 	if types.has(id):
 		active[id] = float(types[id].duration)
+		_sync_sandals()
 		if id == "WINGS" and player != null:
 			player.start_wing_flight(float(types[id].duration))
 			_spawn_air_coins()
+
+func _sync_sandals() -> void:
+	if player != null:
+		player.jump_time_scale = 1.8 if is_active("SANDAL") else 1.0
+		player.jump_visual_scale = 1.45 if is_active("SANDAL") else Balance.JUMP_VISUAL_SCALE
+
+func consume_shield() -> bool:
+	if not is_active("SHIELD"):
+		return false
+	active.erase("SHIELD")
+	shield_burst_remaining = 0.3
+	shield_burst_center = player.global_position + player.body.position
+	queue_redraw()
+	return true
 
 func _spawn_air_coins() -> void:
 	clear_air_coins()
@@ -105,6 +126,7 @@ func _physics_process(delta: float) -> void:
 	if not visible or player == null:
 		return
 	visual_time += delta
+	shield_burst_remaining = maxf(shield_burst_remaining - delta, 0.0)
 	for id: String in active.keys():
 		if id == "WINGS":
 			active[id] = player.flight_remaining if player.is_flying() else 0.0
@@ -114,6 +136,7 @@ func _physics_process(delta: float) -> void:
 			active.erase(id)
 			if id == "WINGS":
 				clear_air_coins()
+	_sync_sandals()
 	if game.total_time >= next_spawn_time:
 		_try_spawn()
 	for index in range(items.size() - 1, -1, -1):
@@ -178,6 +201,11 @@ func snapshot() -> Dictionary:
 	return {"active": active.duplicate(true), "spawned": spawned, "collected": collected, "next_spawn_time": next_spawn_time, "items": items.duplicate(true)}
 
 func _draw() -> void:
+	if player != null and is_active("SHIELD"):
+		_draw_leaf_ring(player.global_position + player.body.position, 0.0, 1.0)
+	if shield_burst_remaining > 0.0:
+		var progress := 1.0 - shield_burst_remaining / 0.3
+		_draw_leaf_ring(shield_burst_center, progress * 95.0, 1.0 - progress)
 	for item: Dictionary in items:
 		var id := String(item.type)
 		var center := Vector2(stages.branch_x_at(int(item.route), float(item.y)), float(item.y) + sin(visual_time * 3.5) * 5.0)
@@ -186,6 +214,16 @@ func _draw() -> void:
 		draw_arc(center, 21.0, 0.0, TAU, 40, color, 2.0, true)
 		if textures.has(id):
 			draw_texture_rect(textures[id], Rect2(center - Vector2(22, 22), Vector2(44, 44)), false)
+		elif id == "SHIELD":
+			_draw_leaf(center, -0.4, color, 1.5)
+		elif id == "SANDAL":
+			for x in [-8.0, 8.0]:
+				draw_line(center + Vector2(x - 5, -10), center + Vector2(x + 5, -10), color, 6.0, true)
+				var spring := PackedVector2Array()
+				for i in 7:
+					spring.append(center + Vector2(x + (-4.0 if i % 2 == 0 else 4.0), -5.0 + i * 2.5))
+				draw_polyline(spring, Color.WHITE, 2.0, true)
+				draw_line(center + Vector2(x - 5, 13), center + Vector2(x + 6, 13), color, 4.0, true)
 		elif id == "MAGNET":
 			draw_colored_polygon(PackedVector2Array([center + Vector2(-15, 4), center + Vector2(-10, -14), center + Vector2(7, -10), center + Vector2(0, 2)]), color)
 			draw_arc(center + Vector2(4, 1), 10.0, 0.0, PI, 20, Color.WHITE, 5.0, true)
@@ -195,3 +233,16 @@ func _draw() -> void:
 			draw_circle(center + Vector2(-5, -4), 11.0, color, true, -1.0, true)
 			draw_circle(center + Vector2(4, -9), 9.0, color, true, -1.0, true)
 			draw_string(ThemeDB.fallback_font, center + Vector2(-14, 15), "×2", HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
+
+func _draw_leaf_ring(center: Vector2, spread: float, alpha: float) -> void:
+	for index in 8:
+		var angle := visual_time * 2.0 + TAU * float(index) / 8.0
+		var offset := Vector2(cos(angle) * (48.0 + spread), sin(angle) * (58.0 + spread))
+		_draw_leaf(center + offset, angle + PI * 0.5, Color(0.32, 0.93, 0.4, alpha))
+
+func _draw_leaf(center: Vector2, angle: float, color: Color, leaf_scale := 1.0) -> void:
+	var points := PackedVector2Array()
+	for point in [Vector2(-11, 0), Vector2(-3, -6), Vector2(6, -5), Vector2(12, 0), Vector2(3, 6), Vector2(-6, 5)]:
+		points.append(center + (point * leaf_scale).rotated(angle))
+	draw_colored_polygon(points, color)
+	draw_line(center + Vector2(-8, 0).rotated(angle) * leaf_scale, center + Vector2(8, 0).rotated(angle) * leaf_scale, Color(0.08, 0.4, 0.12, color.a), 1.5, true)
