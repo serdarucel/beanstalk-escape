@@ -13,6 +13,7 @@ var items: Array[Dictionary] = []
 var spawned := 0
 var collected := 0
 var next_spawn_time := 0.0
+var first_spawn_waiting_for_tutorial := false
 var player: PlayerController
 var stages: StageManager
 var game: GameManager
@@ -73,6 +74,7 @@ func reset_run() -> void:
 	rng.seed = stages.run_seed ^ 0xB8
 	# The pickup appears now; its contact height is another 1.5 seconds ahead.
 	next_spawn_time = rng.randf_range(15.0, 17.0)
+	first_spawn_waiting_for_tutorial = false
 	queue_redraw()
 
 func is_active(id: String) -> bool:
@@ -146,7 +148,12 @@ func _physics_process(delta: float) -> void:
 			if id == "WINGS":
 				clear_air_coins()
 	_sync_sandals()
-	if game.total_time >= next_spawn_time:
+	if spawned == 0 and game.tutorial_active:
+		first_spawn_waiting_for_tutorial = true
+	elif first_spawn_waiting_for_tutorial:
+		next_spawn_time = maxf(next_spawn_time, game.total_time + 1.0)
+		first_spawn_waiting_for_tutorial = false
+	if not first_spawn_waiting_for_tutorial and game.total_time >= next_spawn_time:
 		_try_spawn()
 	for index in range(items.size() - 1, -1, -1):
 		var item := items[index]
