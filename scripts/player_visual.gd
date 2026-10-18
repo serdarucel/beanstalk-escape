@@ -2,6 +2,9 @@ class_name PlayerVisual
 extends Node2D
 
 const FRAME_ROOT := "res://assets/art/character_frames"
+const EXPLORER_ROOT := "res://assets/art/character3d"
+const EXPLORER_KINDS := {"M1": "erkek", "F1": "kadin"}
+const EXPLORER_ANIMS := ["climb", "hang", "lane_left", "lane_right", "jump", "slide", "fall", "hit", "death", "respawn", "fly", "front"]
 const WING_TEXTURE := preload("res://assets/art/character_rig/wing/time_wings.png")
 const TRANSFER_LEAF_TEXTURE := preload("res://assets/art/fx/transfer_leaf.png")
 const ROCK_FIRE_ATLAS := preload("res://assets/art/hazards/rock_fire_atlas.png")
@@ -22,6 +25,8 @@ const SKIN_IDS := ["M1", "M2", "M3", "F1", "F2", "F3"]
 const FRAME_RATE := 8.0
 const ART_SCALE := 0.49
 const BASE_Y := -7.2
+const EXPLORER_SCALE := 238.0 * ART_SCALE / 201.0
+const EXPLORER_FOOT_Y := BASE_Y + (269.0 - 300.0 * 0.5) * ART_SCALE
 const WINGS_TARGET_WIDTH := ScaleLock.CHARACTER_WIDTH * 1.8
 const TIME_WINGS_VISIBLE_RATIO := 1344.0 / 1415.0
 const FIRE_WINGS_REGION_SIZE := Vector2(512, 512)
@@ -72,6 +77,12 @@ var _last_transfer_direction := 1.0
 var _time_wings_reveal := 0.0
 var _time_wings_was_active := false
 var _time_wings_target_scale := WINGS_TARGET_WIDTH / (WING_TEXTURE.get_width() * TIME_WINGS_VISIBLE_RATIO)
+var _explorer_meta: Dictionary = {}
+var _explorer_outfit := ""
+var _explorer_kind := ""
+var _explorer_anim_time := 0.0
+var _explorer_previous_app_state := -1
+var _explorer_respawning := false
 
 func _ready() -> void:
 	_build_visual()
@@ -128,6 +139,9 @@ func _update_mode(player: PlayerController, delta: float) -> void:
 	var app_state := int(game.get("app_state")) if game != null else GameManager.AppState.MENU
 	if app_state == GameManager.AppState.PAUSED:
 		return
+	if _is_explorer():
+		_update_explorer_mode(player, app_state, delta)
+		return
 	if app_state in [GameManager.AppState.MENU, GameManager.AppState.INTRO, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]:
 		_set_mode("menu", "hang")
 	elif app_state == GameManager.AppState.PLAYER_DEAD:
@@ -163,6 +177,96 @@ func _update_mode(player: PlayerController, delta: float) -> void:
 		_was_transferring = false
 	_update_transfer_trails(player.support_state == PlayerController.SupportState.TRANSFERRING, delta)
 
+func _is_explorer() -> bool:
+	return EXPLORER_KINDS.has(skin_id)
+
+func _sprite_base_position() -> Vector2:
+	return Vector2(0.0, EXPLORER_FOOT_Y if _is_explorer() else BASE_Y)
+
+func _update_explorer_mode(player: PlayerController, app_state: int, delta: float) -> void:
+	var menu_states := [GameManager.AppState.MENU, GameManager.AppState.INTRO, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]
+	if app_state == GameManager.AppState.PLAYING and (_explorer_previous_app_state == -1 or _explorer_previous_app_state == GameManager.AppState.PLAYER_DEAD or _explorer_previous_app_state in menu_states):
+		_explorer_respawning = true
+		_explorer_anim_time = 0.0
+		hurt_remaining = 0.0
+	_explorer_previous_app_state = app_state
+	scale.x = absf(scale.x)
+	sprite.position = _sprite_base_position()
+	var transferring := false
+	if app_state in menu_states:
+		_explorer_respawning = false
+		mode = "menu"
+		_animate_explorer("hang", delta)
+	elif app_state == GameManager.AppState.PLAYER_DEAD:
+		_explorer_respawning = false
+		if mode != "death":
+			death_offset = 0.0
+		mode = "death"
+		death_offset = minf(death_offset + delta * 76.0, 92.0)
+		sprite.position.y += death_offset
+		_animate_explorer("death", delta)
+	elif player.support_state == PlayerController.SupportState.TRANSFERRING:
+		_explorer_respawning = false
+		transferring = true
+		var direction := signf(Balance.ROUTE_X[player.transition_to] - Balance.ROUTE_X[player.transition_from])
+		_last_transfer_direction = -1.0 if direction < 0.0 else 1.0
+		takeoff_particles.scale.x = _last_transfer_direction
+		if not _was_transferring:
+			takeoff_particles.restart()
+			takeoff_particles.emitting = true
+		mode = "jump"
+		var animation := "lane_left" if direction < 0.0 else "lane_right"
+		var frames := int(_explorer_meta["anims"][animation]["frames"])
+		_set_explorer_frame(animation, int(clampf(player.transition_progress, 0.0, 1.0) * float(frames - 1)))
+	elif hurt_remaining > 0.0:
+		_explorer_respawning = false
+		mode = "hurt"
+		_animate_explorer("hit", delta)
+	elif player.support_state == PlayerController.SupportState.FALLING_RECOVERY:
+		_explorer_respawning = false
+		mode = "fall"
+		_animate_explorer("fall", delta)
+	elif _explorer_respawning:
+		mode = "respawn"
+		_animate_explorer("respawn", delta)
+		var respawn: Dictionary = _explorer_meta["anims"]["respawn"]
+		if _explorer_anim_time >= float(respawn["frames"]) / float(respawn["fps"]):
+			_explorer_respawning = false
+			mode = "climb"
+			_animate_explorer("climb", 0.0)
+	elif player.time_wings_active or player.fire_wings_active:
+		mode = "fly"
+		_animate_explorer("fly", delta)
+	else:
+		mode = "climb"
+		_animate_explorer("climb", delta)
+	# jump/slide are loaded for future manual jump/slide support states.
+	_was_transferring = transferring
+	_update_transfer_trails(transferring, delta)
+
+func _animate_explorer(animation: String, delta: float) -> void:
+	if frame_name != animation:
+		_explorer_anim_time = 0.0
+	else:
+		_explorer_anim_time += delta
+	var data: Dictionary = _explorer_meta["anims"][animation]
+	var frames := int(data["frames"])
+	var index := int(floor(_explorer_anim_time * float(data.get("fps", 1.0))))
+	index = index % frames if bool(data.get("loop", false)) else mini(index, frames - 1)
+	_set_explorer_frame(animation, index)
+
+func _set_explorer_frame(animation: String, index: int) -> void:
+	if frame_name != animation:
+		_explorer_anim_time = 0.0
+	frame_name = animation
+	var texture := frame_textures[animation] as Texture2D
+	if sprite.texture != texture:
+		sprite.frame = 0
+		sprite.hframes = 1
+		sprite.texture = texture
+		sprite.hframes = int(_explorer_meta["anims"][animation]["frames"])
+	sprite.frame = clampi(index, 0, sprite.hframes - 1)
+
 func _update_transfer_trails(transferring: bool, delta: float) -> void:
 	if transferring:
 		_transfer_trail_alpha = 1.0
@@ -171,7 +275,7 @@ func _update_transfer_trails(transferring: bool, delta: float) -> void:
 	for trail in transfer_trails:
 		# The whole body is mirrored in flight. Preserve that world-space side
 		# while the residual trail fades after the body returns to +X scale.
-		trail.scale.x = 1.0 if transferring else _last_transfer_direction
+		trail.scale.x = _last_transfer_direction if _is_explorer() or not transferring else 1.0
 		trail.modulate.a = _transfer_trail_alpha
 		trail.visible = _transfer_trail_alpha > 0.0
 
@@ -182,6 +286,10 @@ func _set_mode(new_mode: String, requested_frame: String) -> void:
 	_set_frame(requested_frame)
 
 func _set_frame(requested_frame: String) -> void:
+	if _is_explorer():
+		_set_explorer_frame(requested_frame if frame_textures.has(requested_frame) else "hang", 0)
+		_update_cosmetic_anchors()
+		return
 	var requested_texture := frame_textures.get(requested_frame) as Texture2D
 	if requested_frame == "front" and outfit_front_texture != null:
 		requested_texture = outfit_front_texture
@@ -203,8 +311,25 @@ func set_skin(requested_skin: String) -> bool:
 func _load_skin(requested_skin: String) -> void:
 	var normalized := requested_skin.to_upper()
 	skin_id = normalized if normalized in SKIN_IDS and _skin_exists(normalized) else "M1"
-	frame_textures.clear()
 	frame_metrics.clear()
+	if _is_explorer():
+		_explorer_previous_app_state = -1
+		_load_outfit_art()
+		var current := frame_name
+		frame_name = ""
+		_set_frame(current)
+		return
+	frame_textures.clear()
+	if not _explorer_kind.is_empty():
+		sprite.frame = 0
+		sprite.hframes = 1
+		sprite.offset = Vector2.ZERO
+		sprite.scale = Vector2.ONE * ART_SCALE
+		sprite.position = _sprite_base_position()
+		takeoff_particles.scale.x = 1.0
+	_explorer_meta.clear()
+	_explorer_kind = ""
+	_explorer_outfit = ""
 	for requested_frame in ["climb_left", "climb_right", "climb_reach", "jump", "hurt", "fall", "cheer", "hang", "front"]:
 		var frame_texture := load("%s/%s/%s.png" % [FRAME_ROOT, skin_id.to_lower(), requested_frame]) as Texture2D
 		frame_textures[requested_frame] = frame_texture
@@ -222,6 +347,8 @@ func _load_skin(requested_skin: String) -> void:
 	_set_frame(current)
 
 func _skin_exists(requested_skin: String) -> bool:
+	if EXPLORER_KINDS.has(requested_skin):
+		return ResourceLoader.exists("%s/%s/base/hang.png" % [EXPLORER_ROOT, EXPLORER_KINDS[requested_skin]])
 	return ResourceLoader.exists("%s/%s/hang.png" % [FRAME_ROOT, requested_skin.to_lower()])
 
 func _load_anchors() -> void:
@@ -271,6 +398,9 @@ func preview_cosmetic(item: Dictionary) -> void:
 
 func _update_cosmetic_anchors() -> void:
 	if sprite.texture == null:
+		return
+	if _is_explorer():
+		_update_explorer_anchors()
 		return
 	var metrics: Dictionary = frame_metrics.get(frame_name, {})
 	var used: Rect2i = metrics.get("used", Rect2i())
@@ -323,6 +453,8 @@ func _update_cosmetic_anchors() -> void:
 		outfit_effect.visible = not outfit_effect.effect_name.is_empty()
 
 func play_celebration() -> void:
+	if _is_explorer():
+		return
 	celebrate_remaining = 0.75
 
 func preview_tick(delta: float) -> void:
@@ -334,7 +466,7 @@ func preview_tick(delta: float) -> void:
 		fairy_effect.set_preview_mode(true)
 	pet_preview_time += delta
 	var preview_bob := sin(pet_preview_time * 3.2) * 5.0
-	sprite.position = Vector2(0.0, BASE_Y + preview_bob)
+	sprite.position = _sprite_base_position() + Vector2(0.0, preview_bob)
 	_update_cosmetic_anchors()
 	var pet := cosmetic_sprites.get("PET") as Sprite2D
 	if pet != null and pet.visible:
@@ -346,12 +478,12 @@ func preview_tick(delta: float) -> void:
 
 func show_front_preview() -> void:
 	_set_frame("front")
-	sprite.position = Vector2(0.0, BASE_Y)
+	sprite.position = _sprite_base_position()
 	_update_cosmetic_anchors()
 
 func show_back_preview() -> void:
 	_set_frame("hang")
-	sprite.position = Vector2(0.0, BASE_Y)
+	sprite.position = _sprite_base_position()
 	_update_cosmetic_anchors()
 
 func _load_outfit_art() -> void:
@@ -361,7 +493,9 @@ func _load_outfit_art() -> void:
 		outfit_back_sprite.texture = null
 		outfit_back_sprite.visible = false
 	var outfit_id := str(equipped_cosmetics.get("OUTFIT", ""))
-	if not outfit_id.is_empty():
+	if _is_explorer():
+		_load_explorer_art(outfit_id)
+	elif not outfit_id.is_empty():
 		var outfit_name := outfit_id.trim_prefix("outfit_")
 		for pose in frame_textures:
 			if pose == "front":
@@ -379,14 +513,78 @@ func _load_outfit_art() -> void:
 			outfit_effect.configure({})
 		return
 	var front_path := "%s/front/%s/%s.png" % [OUTFIT_ROOT, skin_id.to_lower(), outfit_id]
-	if ResourceLoader.exists(front_path):
+	if not _is_explorer() and ResourceLoader.exists(front_path):
 		outfit_front_texture = load(front_path) as Texture2D
 	if outfit_effect != null:
 		outfit_effect.configure(item)
 	if outfit_aura != null:
 		outfit_aura.configure(item, true)
 
+func _load_explorer_art(outfit_id: String) -> void:
+	var kind: String = EXPLORER_KINDS[skin_id]
+	var outfit := "base" if outfit_id.is_empty() else outfit_id.trim_prefix("outfit_")
+	if _explorer_kind == kind and _explorer_outfit == outfit:
+		return
+	var folder := "%s/%s/%s" % [EXPLORER_ROOT, kind, outfit]
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("%s/meta.json" % folder))
+	_explorer_meta = parsed as Dictionary
+	_explorer_kind = kind
+	_explorer_outfit = outfit
+	frame_textures.clear()
+	anchor_data.clear()
+	for animation in EXPLORER_ANIMS:
+		frame_textures[animation] = load("%s/%s.png" % [folder, animation]) as Texture2D
+	var pivot: Array = _explorer_meta["pivot"]
+	var cell_size := Vector2(float(_explorer_meta["frame_w"]), float(_explorer_meta["frame_h"]))
+	sprite.offset = cell_size * 0.5 - Vector2(float(pivot[0]), float(pivot[1]))
+	sprite.scale = Vector2.ONE * EXPLORER_SCALE
+	sprite.position = _sprite_base_position()
+
+func _explorer_source_to_local(point: Vector2) -> Vector2:
+	var pivot: Array = _explorer_meta["pivot"]
+	return sprite.position + (point - Vector2(float(pivot[0]), float(pivot[1]))) * EXPLORER_SCALE
+
+func _update_explorer_anchors() -> void:
+	var frames: Array = _explorer_meta["anchors"][frame_name]
+	var anchor: Dictionary = frames[mini(sprite.frame, frames.size() - 1)]
+	var back: Array = anchor["back"]
+	var head: Array = anchor["head"]
+	var head_center := Vector2(float(head[0]), float(head[1]))
+	var head_width := float(anchor["head_w"])
+	var wing_anchor := _explorer_source_to_local(Vector2(float(back[0]), float(back[1])))
+	var back_view := frame_name != "front"
+	time_wings.position = wing_anchor
+	fire_wings.position = wing_anchor
+	time_wings.z_index = 1 if back_view else -1
+	fire_wings.z_index = 1 if back_view else -1
+	for trail in fire_trails:
+		trail.position = wing_anchor
+		trail.z_index = 1 if back_view else -2
+	var pet := cosmetic_sprites.get("PET") as Sprite2D
+	pet.position = _explorer_source_to_local(head_center + Vector2(head_width * 1.65, head_width * 1.75))
+	pet.visible = pet.texture != null and not str(equipped_cosmetics.get("PET", "")).is_empty() and not back_view
+	if fairy_effect != null:
+		fairy_effect.position = pet.position
+		fairy_effect.visible = pet.visible and not fairy_effect.effect_name.is_empty()
+	if outfit_back_sprite != null:
+		outfit_back_sprite.visible = false
+	var pivot: Array = _explorer_meta["pivot"]
+	var body_top := head_center.y - head_width * 0.5
+	var body_height := maxf(float(pivot[1]) - body_top, head_width)
+	var effect_size := Vector2(head_width * 1.65, body_height) * EXPLORER_SCALE
+	var effect_center := _explorer_source_to_local(Vector2(head_center.x, body_top + body_height * 0.5))
+	if outfit_aura != null:
+		outfit_aura.position = effect_center
+		outfit_aura.set_body_box(effect_size)
+		outfit_aura.visible = outfit_aura.effect_name == "SUN RAYS"
+	if outfit_effect != null:
+		outfit_effect.position = effect_center
+		outfit_effect.set_body_box(effect_size)
+		outfit_effect.visible = not outfit_effect.effect_name.is_empty()
+
 func visual_snapshot() -> Dictionary:
+	if _is_explorer():
+		return {"mode": mode, "frame": "%s:%d" % [frame_name, sprite.frame], "skin": skin_id, "art": "3d", "outfit": _explorer_outfit}
 	return {"mode": mode, "frame": frame_name, "skin": skin_id}
 
 func _build_visual() -> void:
