@@ -170,14 +170,23 @@ func _patterns_for_records(source_stages: Array) -> Array:
 		var bean_slots: Array = []
 		var rock_slots: Array = []
 		var storm_slots: Array = []
+		var action_slots: Array = []
 		for encounter: Dictionary in stage.encounters:
 			var kind := String(encounter.recipe.kind)
 			if kind == "GUIDE" or kind == "BULGE":
 				trunk_features.append({"id": encounter.id, "kind": kind, "x": float(encounter.recipe.x), "warning_height": encounter.warning_height, "occupancy": encounter.occupancy})
 			for threat: Dictionary in StageDatabase.threats_for_recipe(encounter.recipe):
 				var threat_kind := String(threat.kind)
+				var threat_class := String(StageDatabase.THREAT_CLASS.get(threat_kind, ""))
 				if threat_kind == "FORK":
 					support_windows.append({"id": encounter.id, "start_progress": float(encounter.anchor) / float(stage.length), "end_progress": float(encounter.occupancy[1]) / float(stage.length), "supports": threat.supports.duplicate(), "warning_progress": float(encounter.warning_height) / float(stage.length)})
+				elif threat_class in ["LOW", "HIGH"]:
+					var route := int(threat.lane)
+					var anchor := int(encounter.anchor)
+					var end := anchor + StageDatabase.ACTION_OCCUPANCY_HEIGHT
+					if not _routes_supported_over(stage, [route], float(anchor), float(end)).has(route):
+						continue
+					action_slots.append({"id": "%s-%s-A%d" % [encounter.id, threat_kind, action_slots.size()], "kind": threat_kind, "class": threat_class, "route": route, "anchor": anchor, "warning_height": encounter.warning_height, "occupancy": [anchor, end]})
 				elif threat_kind == "BEAN":
 					var blocked := int(threat.lane)
 					var volley_end := float(encounter.anchor) + 120.0 + 70.0 * float(int(threat.get("count", 1)) - 1)
@@ -195,7 +204,7 @@ func _patterns_for_records(source_stages: Array) -> Array:
 						continue
 					routes = supported
 					rock_slots.append({"id": "%s-%s-%d" % [encounter.id, threat_kind, rock_slots.size()], "kind": threat_kind, "routes": routes.duplicate(), "anchor": float(encounter.anchor), "warning_height": float(encounter.warning_height), "witness": int(encounter.witness)})
-		result.append({"stage": stage_number, "length": stage.length, "start_height": stage.start_height, "entry": 1, "open_routes": open_routes, "route_end_progress": route_end_progress, "trunk_features": trunk_features, "support_windows": support_windows, "bean_slots": bean_slots, "rock_slots": rock_slots, "storm_slots": storm_slots, "encounters": stage.encounters, "variant": run_variant})
+		result.append({"stage": stage_number, "length": stage.length, "start_height": stage.start_height, "entry": 1, "open_routes": open_routes, "route_end_progress": route_end_progress, "trunk_features": trunk_features, "support_windows": support_windows, "bean_slots": bean_slots, "rock_slots": rock_slots, "storm_slots": storm_slots, "action_slots": action_slots, "encounters": stage.encounters, "variant": run_variant})
 	return result
 
 func _routes_supported_over(stage: Dictionary, routes: Array, start: float, end: float) -> Array:
