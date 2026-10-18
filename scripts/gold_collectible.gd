@@ -41,10 +41,14 @@ func _physics_process(delta: float) -> void:
 		return
 	if not taken and player != null:
 		var eligible := visual_lane == player.active_branch or (player.movement_mode == PlayerController.MovementMode.TRANSITION and visual_lane == player.transition_to)
+		var powered := game != null and game.powerups.is_active("MAGNET")
+		var ahead := player.global_position.y - global_position.y
+		var in_powered_range := powered and ahead >= -40.0 and ahead <= 260.0
+		eligible = eligible or in_powered_range or (powered and magnet_active)
 		if not eligible:
 			magnet_active = false
 			magnet_elapsed = 0.0
-		elif magnet_active or sprite.global_position.distance_to(player.global_position) <= 90.0:
+		elif magnet_active or in_powered_range or sprite.global_position.distance_to(player.global_position) <= 90.0:
 			if not magnet_active:
 				magnet_active = true
 				magnet_origin = sprite.global_position
@@ -76,7 +80,8 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	redraw_count += 1
-	if sparkle_remaining <= 0.0:
+	# Near-zero stars collapse into coincident vertices and cannot triangulate.
+	if sparkle_remaining < 0.01:
 		return
 	var progress := 1.0 - sparkle_remaining / FEEDBACK_DURATION
 	var elapsed := progress * FEEDBACK_DURATION

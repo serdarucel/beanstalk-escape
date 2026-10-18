@@ -141,6 +141,8 @@ var death_cause := DeathCause.NONE
 @onready var beans: BeanSpawner = $BeanSpawner
 @onready var rocks: RockManager = $RockManager
 var action_hazards = preload("res://scripts/action_hazard_manager.gd").new()
+var powerups = preload("res://scripts/powerup_manager.gd").new()
+var powerup_hud_rows: Dictionary = {}
 @onready var audio: BeanstalkAudio = $Audio
 @onready var storm: StormMechanics = $StormMechanics
 @onready var platform_services: Node = get_node("/root/PlatformServices")
@@ -298,6 +300,9 @@ func _ready() -> void:
 	action_hazards.name = "ActionHazardManager"
 	add_child(action_hazards)
 	action_hazards.setup(player, stages)
+	powerups.name = "PowerupManager"
+	add_child(powerups)
+	powerups.setup(player, stages, self)
 	stages.prototype_completed.connect(_on_prototype_completed)
 	stages.stage_completed.connect(_on_stage_completed)
 	_ensure_actions()
@@ -377,7 +382,7 @@ func _physics_process(delta: float) -> void:
 		if result_elapsed >= 1.0:
 			_show_leaderboard()
 	if app_state == AppState.PLAYING:
-		score += maxf(score_previous_y - player.global_position.y, 0.0) * 0.1 * clampi(golds.combo, 1, 5)
+		score += maxf(score_previous_y - player.global_position.y, 0.0) * 0.1 * clampi(golds.combo, 1, 5) * score_multiplier()
 		economy.add_climb(maxf(climb_previous_y - player.global_position.y, 0.0))
 	climb_previous_y = player.global_position.y
 	economy.update_climb_save(delta)
@@ -566,6 +571,7 @@ func _debug_evidence_stage(stage_number: int) -> void:
 	player._sync_stage_mode()
 	stages.update_progress(player.global_position.y)
 	action_hazards.sync_after_player_teleport()
+	powerups.sync_after_player_teleport()
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if not event.pressed:
@@ -643,6 +649,7 @@ func restart() -> void:
 	dead_restart_delay = 0.0
 	confirm_pending = false
 	total_time = 0.0
+	powerups.reset_run()
 	score = 0.0
 	run_coins = 0
 	death_phase = ""
@@ -789,6 +796,7 @@ func _finish_intro() -> void:
 	# Rebuild the exact normal run start so watching and skipping are identical.
 	player.reset_run(Vector2.ZERO)
 	action_hazards.reset_run()
+	powerups.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0.0, _spider_start_gap(1)))
 	beans.reset_run()
@@ -858,6 +866,7 @@ func restart_stage() -> void:
 	_apply_impact_fx(0.0)
 	player.reset_run(Vector2(0, start_y))
 	action_hazards.reset_run()
+	powerups.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0, start_y + _spider_start_gap(stage_number)))
 	_begin_danger(true)
@@ -1183,6 +1192,7 @@ func _respawn_at_continue_checkpoint() -> void:
 	spider.reset_run(safe_position + Vector2(0, _spider_start_gap(safe_stage)))
 	rocks.sync_after_player_teleport()
 	action_hazards.sync_after_player_teleport()
+	powerups.sync_after_player_teleport()
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 	_update_hud()
 	_publish_readonly_web_state()
@@ -1469,6 +1479,7 @@ func _skip_stage_after_reward(stage_number: int) -> void:
 	var next_y := stages.stage_bottom_y(stage_number + 1)
 	player.reset_run(Vector2(0, next_y))
 	action_hazards.sync_after_player_teleport()
+	powerups.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0, next_y + _spider_start_gap(stage_number + 1)))
 	_begin_danger(true)
@@ -1582,6 +1593,7 @@ func _retry_onboarding() -> void:
 	# Re-arm campaign beans after the spawner finishes its current contact loop.
 	beans.call_deferred("reset_run")
 	action_hazards.sync_after_player_teleport()
+	powerups.sync_after_player_teleport()
 	spider.global_position.y += rewind
 	spider.boost_remaining = 0.0
 	spider.retreat_from_danger(spider.far_gap())
@@ -2318,6 +2330,51 @@ func _layout_death_panel(viewport_size: Vector2) -> void:
 		button.add_theme_font_size_override("font_size", 14 if width < 400.0 else 20)
 	_layout_centered_label($HUD/MenuBest, width, $HUD/Menu.position.y - 24.0, 20.0, 12.0)
 
+func score_multiplier() -> int:
+	return 2 if powerups.is_active("DOUBLE") else 1
+
+func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) -> float:
+	var playing := app_state == AppState.PLAYING and not intro_active
+	for id: String in powerup_hud_rows:
+		(powerup_hud_rows[id] as Label).visible = playing and powerups.is_active(id)
+	for id: String in powerups.active:
+		if not powerup_hud_rows.has(id):
+			var row := _add_label("Powerup" + id, Vector2.ZERO, "", font_size)
+			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			row.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+			for part in ["Icon", "Track", "Fill"]:
+				var rect := ColorRect.new()
+				rect.name = part
+				rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				row.add_child(rect)
+			powerup_hud_rows[id] = row
+		var row := powerup_hud_rows[id] as Label
+		row.visible = playing
+		row.add_theme_font_size_override("font_size", font_size)
+		var definition: Dictionary = powerups.types[id]
+		row.text = "%s  %ds" % [definition.label, ceili(float(powerups.active[id]))]
+		var available_width := maxf(width - 28.0, 1.0)
+		var font := row.get_theme_font("font")
+		var lines := maxi(ceili(font.get_string_size(row.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x / available_width), 1)
+		var height := ceilf(font.get_height(font_size) * lines * 1.3) + 14.0
+		row.position = Vector2(x + 28.0, top)
+		row.size = Vector2(available_width, height)
+		var icon := row.get_node("Icon") as ColorRect
+		icon.color = definition.color
+		icon.position = Vector2(-26.0, 6.0)
+		icon.size = Vector2(18.0, 18.0)
+		var track := row.get_node("Track") as ColorRect
+		track.color = Color(0.05, 0.12, 0.10, 0.8)
+		track.position = Vector2(-28.0, height - 8.0)
+		track.size = Vector2(width, 6.0)
+		var fill := row.get_node("Fill") as ColorRect
+		fill.color = definition.color
+		fill.position = track.position
+		fill.size = Vector2(width * clampf(float(powerups.active[id]) / float(definition.duration), 0.0, 1.0), 6.0)
+		top += height + 6.0
+	return top
+
 func _layout_gameplay_text(viewport_size: Vector2) -> void:
 	var window_size := Vector2(DisplayServer.window_get_size())
 	var pixel_scale := window_size.x / maxf(viewport_size.x, 1.0)
@@ -2344,6 +2401,8 @@ func _layout_gameplay_text(viewport_size: Vector2) -> void:
 		label.size = Vector2(block_width, row_height)
 		label.pivot_offset = label.size * Vector2(1.0, 0.5)
 		top += row_height + 4.0
+		if label == $HUD/Score:
+			top = _layout_powerup_rows(width - right_margin - block_width, top, block_width, maxi(18, minimum_font))
 	var time_label := $HUD/TimeWings as Label
 	$HUD/TimeWingsOrb.size = Vector2(24.0, 24.0)
 	$HUD/TimeWingsOrb.position = time_label.position + Vector2(-28.0, (time_label.size.y - 24.0) * 0.5)
@@ -2952,6 +3011,7 @@ func _readonly_state_snapshot() -> Dictionary:
 		"fire_wings": {"unlocked": stages.stage_for_y(player.global_position.y) >= Balance.FIRE_WINGS_STAGE or debug_sandbox == "rocks", "active": fire_wings_remaining > 0.0, "remaining": fire_wings_remaining, "started_remaining": fire_wings_started_remaining, "used": fire_wings_used_stage.has(stages.stage_for_y(player.global_position.y))},
 		"rocks": rocks.snapshot(),
 		"action_hazards": action_hazards.snapshot(),
+		"powerups": powerups.snapshot(),
 		"player_action": "AIRBORNE" if player.is_airborne() else ("HUG" if player.is_hugging() else "NONE"),
 		"audio_events": audio.audio_event_snapshot(),
 		"gold_fx": golds.feedback_state(),
@@ -3034,6 +3094,7 @@ func _start_debug_stage(stage_number: int) -> void:
 	var start_y := stages.stage_bottom_y(stage_number)
 	player.reset_run(Vector2(0.0, start_y))
 	action_hazards.sync_after_player_teleport()
+	powerups.sync_after_player_teleport()
 	climb_previous_y = player.global_position.y
 	spider.reset_run(Vector2(0.0, start_y + _spider_start_gap(stage_number)))
 	_begin_danger(true)
