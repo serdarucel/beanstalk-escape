@@ -12,6 +12,9 @@ var _follow_start_x := 0.0
 var _follow_elapsed := 0.0
 var _follow_delay_remaining := 0.0
 var _danger_tracking := false
+var _gap_following := false
+var _last_gap := Balance.DANGER_GAP
+var _preserved_reset := false
 var _gap_transition_elapsed := 0.0
 var _gap_transition_seconds := 0.0
 var _gap_transition_from := 0.0
@@ -23,7 +26,7 @@ var nightmare_modifiers := StageDatabase.nightmare_modifiers()
 
 func _physics_process(delta: float) -> void:
 	advance_active_clocks(delta)
-	if player != null and (_danger_tracking or _gap_transition_seconds > 0.0):
+	if player != null and _gap_following:
 		_update_danger_gap(delta)
 		return
 	var gap := distance_to_player()
@@ -45,10 +48,16 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 func reset_run(at_position: Vector2) -> void:
-	_danger_tracking = false
-	_gap_transition_seconds = 0.0
+	# The player has already teleported here. Retain the last relative gap,
+	# including any in-flight transition, instead of using a stage-start gap.
+	_preserved_reset = _gap_following and game != null and not game.intro_active and not game.tutorial_active and game.total_time > 0.0 and game.app_state in [GameManager.AppState.PLAYING, GameManager.AppState.PLAYER_DEAD]
+	if not _preserved_reset:
+		_danger_tracking = false
+		_gap_following = false
+		_gap_transition_seconds = 0.0
 	var reset_x := player.global_position.x if player != null else at_position.x
-	global_position = Vector2(reset_x, at_position.y)
+	var reset_y := player.global_position.y + _last_gap if _preserved_reset and player != null else at_position.y
+	global_position = Vector2(reset_x, reset_y)
 	velocity = Vector2.ZERO
 	boost_remaining = 0.0
 	boost_start_count = 0
@@ -62,15 +71,32 @@ func reset_run(at_position: Vector2) -> void:
 	_follow_delay_remaining = 0.0
 
 func begin_danger(immediate := false) -> void:
+	_gap_following = true
 	_danger_tracking = true
 	_start_gap_transition(Balance.DANGER_GAP, Balance.DANGER_APPROACH_SECONDS)
-	if immediate and player != null:
+	if immediate and not _preserved_reset and player != null:
 		global_position.y = player.global_position.y + Balance.DANGER_GAP
 		_gap_transition_seconds = 0.0
+	_last_gap = distance_to_player()
+	_preserved_reset = false
 
-func retreat_from_danger(normal_gap: float) -> void:
+func retreat_from_danger(_normal_gap: float) -> void:
+	_gap_following = true
 	_danger_tracking = false
-	_start_gap_transition(normal_gap, Balance.DANGER_RETREAT_SECONDS)
+	_start_gap_transition(far_gap(), Balance.DANGER_RETREAT_SECONDS)
+
+func far_gap() -> float:
+	var camera := get_viewport().get_camera_2d()
+	if player == null or camera == null:
+		return Balance.START_DISTANCE
+	# Player physics runs before camera scrolling; read this frame's center.
+	camera.force_update_scroll()
+	var visible_height := get_viewport_rect().size.y / maxf(camera.zoom.y, 0.001)
+	var below_player := camera.get_screen_center_position().y + visible_height * 0.5 - player.global_position.y
+	return maxf(below_player + 24.0, Balance.DANGER_GAP)
+
+func audio_level() -> float:
+	return 1.0 - clampf(distance_to_player() / far_gap(), 0.0, 1.0)
 
 func _start_gap_transition(target_gap: float, seconds: float) -> void:
 	_gap_transition_from = maxf(distance_to_player(), Balance.DANGER_GAP)
@@ -79,8 +105,10 @@ func _start_gap_transition(target_gap: float, seconds: float) -> void:
 	_gap_transition_seconds = seconds
 
 func _update_danger_gap(delta: float) -> void:
-	var gap := Balance.DANGER_GAP
+	var gap := Balance.DANGER_GAP if _danger_tracking else far_gap()
 	if _gap_transition_seconds > 0.0:
+		if not _danger_tracking:
+			_gap_transition_to = far_gap()
 		_gap_transition_elapsed = minf(_gap_transition_elapsed + delta, _gap_transition_seconds)
 		var progress := _gap_transition_elapsed / _gap_transition_seconds
 		gap = lerpf(_gap_transition_from, _gap_transition_to, smoothstep(0.0, 1.0, progress))
@@ -88,6 +116,7 @@ func _update_danger_gap(delta: float) -> void:
 			_gap_transition_seconds = 0.0
 	var previous_y := global_position.y
 	global_position.y = player.global_position.y + maxf(gap, Balance.DANGER_GAP)
+	_last_gap = distance_to_player()
 	velocity = Vector2(0.0, (global_position.y - previous_y) / maxf(delta, 0.000001))
 	speed_ratio = -velocity.y / (Balance.PLAYER_VERTICAL_SPEED * player.speed_scale)
 	catchup_active = false

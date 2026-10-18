@@ -12,14 +12,11 @@ const FRAMES := [
 ]
 
 # Keep the 176x152 frames near native size, slightly taller than the player.
-# Reveal the smaller visual at the lower edge without moving the gameplay body.
+# At far_gap the native upper leg tips cross the bottom edge; the body stays below it.
 const VISUAL_SCALE := 1.0
-const EDGE_REVEAL_PX := 112.0
-const MIN_EDGE_PLAYER_GAP_PX := 130.0
 const BASE_POSITION := Vector2(0, -8)
 const FRAME_ALPHA_TOP := [31.0, 43.0, 31.0, 40.0, 24.0, 37.0, 33.0, 40.0]
 const FRAME_ALPHA_BOTTOM := 144.0
-const SAFE_ALPHA_TOP := 43.0
 
 var sprite := Sprite2D.new()
 var web_line := Line2D.new()
@@ -53,7 +50,10 @@ func _process(_delta: float) -> void:
 	current_frame = frame
 	sprite.texture = FRAMES[current_frame]
 	_update_follow_pose(spider)
-	_apply_bottom_edge_framing()
+	sprite.position = BASE_POSITION
+	# Do not pull the body back onto the screen or expose a long web above it.
+	if spider.distance_to_player() >= spider.far_gap() - 1.0:
+		web_line.visible = false
 	if web_line.visible:
 		_update_web_line(clampf(spider.horizontal_motion_speed / 900.0, -1.0, 1.0))
 
@@ -92,28 +92,3 @@ func visibility_snapshot() -> Dictionary:
 	var viewport_height := get_viewport_rect().size.y
 	var visible_px := maxf(minf(screen_bottom, viewport_height) - maxf(screen_top, 0.0), 0.0)
 	return {"on_screen": visible_px > 0.5, "visible_px": snappedf(visible_px, 0.1)}
-
-func _apply_bottom_edge_framing() -> void:
-	sprite.position = BASE_POSITION
-	if sprite.texture == null or not is_inside_tree():
-		return
-	var body_transform := get_global_transform_with_canvas()
-	var screen_origin := body_transform * Vector2.ZERO
-	var viewport_rect := get_viewport_rect()
-	# Preserve actual gameplay spacing whenever the spider's origin is on screen.
-	if viewport_rect.has_point(screen_origin) or screen_origin.y < viewport_rect.end.y:
-		return
-	var texture_height := float(sprite.texture.get_height())
-	var safe_top_local := SAFE_ALPHA_TOP - texture_height * 0.5
-	var screen_top := (sprite.get_global_transform_with_canvas() * Vector2(0.0, safe_top_local)).y
-	var screen_unit_y := body_transform * Vector2.DOWN
-	var pixels_per_world_unit := maxf((screen_unit_y - screen_origin).length(), 0.001)
-	var sprite_screen_y := sprite.get_global_transform_with_canvas().origin.y
-	var desired_screen_y := viewport_rect.end.y - EDGE_REVEAL_PX + sprite_screen_y - screen_top
-	var spider := get_parent() as SpiderController
-	if spider != null and spider.player != null:
-		var player_screen_y := spider.player.get_global_transform_with_canvas().origin.y
-		desired_screen_y = maxf(desired_screen_y, player_screen_y + MIN_EDGE_PLAYER_GAP_PX)
-	if sprite_screen_y <= desired_screen_y:
-		return
-	sprite.position.y -= (sprite_screen_y - desired_screen_y) / pixels_per_world_unit
