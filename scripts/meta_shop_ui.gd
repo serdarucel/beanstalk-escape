@@ -158,6 +158,11 @@ func _build() -> void:
 	grid.columns = 3
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(grid)
+	grid.minimum_size_changed.connect(func(): _layout.call_deferred())
+	grid.child_entered_tree.connect(func(_child): _layout.call_deferred())
+	# ScrollContainer resets its child's transform when sorting after a resize.
+	scroll.sort_children.connect(func():
+		grid.set_deferred("scale", Vector2.ONE * float(grid.get_meta("card_scale", 1.0))))
 	footer = HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_child(footer)
@@ -185,6 +190,11 @@ func _build() -> void:
 func _layout() -> void:
 	var width := maxf(size.x, 320.0)
 	var height := maxf(size.y, 320.0)
+	grid.scale = Vector2.ONE
+	grid.set_meta("card_scale", 1.0)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	title_label.position = Vector2(12, 8)
 	title_label.size = Vector2(width - 24, 36)
 	tabs.position = Vector2(8, 48)
@@ -207,9 +217,48 @@ func _layout() -> void:
 	grid.columns = (6 if scroll.size.x >= 720.0 else 3) if map_mode else (3 if scroll.size.x >= 450.0 else 2)
 	if mode == "SELECT" or (mode == "SHOP" and active_tab == "CHARACTERS"):
 		grid.columns = maxi(economy.character_catalog().size(), 1)
-		var cards_width := minf(scroll.size.x, grid.get_combined_minimum_size().x)
-		scroll.position.x += (scroll.size.x - cards_width) * 0.5
-		scroll.size.x = cards_width
+		# Keep the approved desktop type; wide phones use the HUD's device-pixel floor.
+		var window_size := Vector2(get_tree().root.size)
+		var pixel_scale := window_size.x / maxf(get_viewport_rect().size.x, 1.0)
+		var minimum_font := ceili(28.0 * minf(window_size.x, window_size.y) / 1080.0 / maxf(pixel_scale, 0.001))
+		var card_font := maxi(12, minimum_font) if width / height > 2.0 else 12
+		for card in grid.get_children():
+			if card is PanelContainer:
+				for label in card.find_children("*", "Label", true, false):
+					label.add_theme_font_size_override("font_size", card_font)
+		var minimum := grid.get_combined_minimum_size()
+		if minimum.x <= 0.0 or minimum.y <= 0.0:
+			return
+		var portrait := height > width and mode == "SHOP"
+		var available_width := width - 32.0 if portrait else scroll.size.x
+		var available_height := footer_y - 104.0
+		var card_scale := minf(available_width / minimum.x, available_height / minimum.y)
+		if portrait:
+			# Fill the portrait screen with a centered preview, then cards and shield.
+			card_scale = minf(card_scale, available_height * 0.5 / minimum.y)
+		else:
+			card_scale = minf(card_scale, 1.0)
+		grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		grid.set_meta("card_scale", card_scale)
+		grid.scale = Vector2.ONE * card_scale
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.scroll_horizontal = 0
+		scroll.scroll_vertical = 0
+		var cards_size := minimum * card_scale
+		if portrait:
+			preview_host.position = Vector2(16, 92)
+			preview_host.size = Vector2(width - 32.0, available_height - cards_size.y - 12.0)
+			preview.scale *= minf(preview_host.size.y / 240.0, preview_host.size.x / 240.0)
+			preview.position = preview_host.size * 0.5
+			scroll.position = Vector2((width - cards_size.x) * 0.5, preview_host.position.y + preview_host.size.y + 12.0)
+			# TURN shares the bottom row with GOLD and BACK.
+			view_toggle_button.position = Vector2(16, footer_y + 3.0)
+			footer.position.x = 134.0
+			footer.size.x = width - 142.0
+		else:
+			scroll.position.x += (scroll.size.x - cards_size.x) * 0.5
+		scroll.size = cards_size
 	tabs.size = Vector2(width - 16, 38)
 
 func refresh() -> void:
