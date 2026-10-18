@@ -368,9 +368,9 @@ static func validate_sequence(stages: Array) -> Dictionary:
 	var violations := 0
 	var min_window := INF
 	var previous_end := 0.0
-	var previous_anchor := 0.0
 	var previous_recipe := {}
 	var frontier := {}
+	var speed := Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE
 	for stage_value: Dictionary in stages:
 		var start := float(stage_value.get("start_height", 0.0))
 		for encounter: Dictionary in stage_value.encounters:
@@ -388,16 +388,14 @@ static func validate_sequence(stages: Array) -> Dictionary:
 				var route := int(solution.route)
 				var best := INF if frontier.is_empty() else -INF
 				for previous_route in frontier:
-					# The authored 0.6-second phrase is evaluated at its B1 speed,
-					# rather than at the speed cap reached minutes later.
-					var reaction_start := previous_end
-					# Staying on an already clear lane does not wait for a hazard
-					# on another lane to finish. Transfers still use full occupancy.
-					if int(previous_route) == route and not previous_recipe.is_empty() and route_survives(previous_recipe, route):
-						reaction_start = previous_anchor
-					var window := Balance.estimated_time_for_height(start + float(encounter.anchor)) - Balance.estimated_time_for_height(reaction_start) - _transfer_seconds(int(previous_route), route)
+					# Every required command must remain possible at the speed cap.
+					# A lane clear in both recipes needs no new command when staying
+					# on it; it still inherits the entire path's earlier bottleneck.
+					var staying_clear := int(previous_route) == route and String(solution.action) == "none" and route_survives(previous_recipe, route)
+					var window := INF if staying_clear else (start + float(encounter.anchor) - previous_end) / speed - _transfer_seconds(int(previous_route), route)
 					best = maxf(best, minf(float(frontier[previous_route]), window))
-				next_frontier[route] = best
+				# Several actions may end on the same lane; keep its best path.
+				next_frontier[route] = maxf(float(next_frontier.get(route, -INF)), best)
 			if not frontier.is_empty():
 				var best_window := -INF
 				for value in next_frontier.values():
@@ -410,7 +408,6 @@ static func validate_sequence(stages: Array) -> Dictionary:
 						next_frontier[route] = INF
 			frontier = next_frontier
 			previous_end = start + float(encounter.get("occupancy", [encounter.anchor, float(encounter.anchor) + OCCUPANCY_HEIGHT])[1])
-			previous_anchor = start + float(encounter.anchor)
 			previous_recipe = encounter.recipe
 	return {"encounters": encounters, "unsolvable": unsolvable, "min_window_seconds": min_window, "violations": violations}
 
