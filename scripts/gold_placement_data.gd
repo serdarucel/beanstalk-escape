@@ -5,6 +5,7 @@ const HAZARD_CLEARANCE_PX := 16.0
 const LINE_COUNT := 5
 # gold_coin.png is 64 px, displayed at 0.82 by GoldCollectible.
 const COIN_DIAMETER_PX := 64.0 * 0.82
+const MIN_COIN_SPACING_PX := COIN_DIAMETER_PX * 1.4
 const COIN_SPACING_PX := COIN_DIAMETER_PX * 1.6
 const ARC_HEIGHT_PX := 22.0
 
@@ -31,14 +32,17 @@ static func placements_for_stage(stage_number: int, count: int, stages: StageMan
 		var gap_end := float(current.anchor) - HAZARD_CLEARANCE_PX - 1.0
 		if gap_end <= gap_start:
 			continue
-		var spacing := minf(COIN_SPACING_PX, (gap_end - gap_start) / float(LINE_COUNT - 1))
-		var start := (gap_start + gap_end - spacing * float(LINE_COUNT - 1)) * 0.5
+		var row_count := mini(LINE_COUNT, int(floor((gap_end - gap_start) / MIN_COIN_SPACING_PX)) + 1)
+		if row_count < 3:
+			continue
+		var spacing := minf(COIN_SPACING_PX, (gap_end - gap_start) / float(row_count - 1))
+		var start := (gap_start + gap_end - spacing * float(row_count - 1)) * 0.5
 		var x := _witness_x(stage_number, current.witness)
 		var route := _route_at_x(stage_number, x, stages)
 		var row: Array = []
-		for coin_index in LINE_COUNT:
+		for coin_index in row_count:
 			_append_coin(row, stage_number, Vector2(x, start + float(coin_index) * spacing), route, encounters, stages)
-		if row.size() == LINE_COUNT:
+		if row.size() == row_count:
 			for coin: Dictionary in row:
 				coin.id = "S%03d-G%02d" % [stage_number, result.size() + 1]
 				result.append(coin)
@@ -46,7 +50,7 @@ static func placements_for_stage(stage_number: int, count: int, stages: StageMan
 				line_start = start
 	var remaining := count - result.size()
 	if remaining <= 0:
-		return result
+		return _filter_coin_spacing(result)
 	# Spend the remaining budget on an authored route change. Never draw a
 	# direct L-to-R jump: the player transfers between adjacent branches.
 	# Include the entry from C to the first witness, before the first hazard.
@@ -70,14 +74,79 @@ static func placements_for_stage(stage_number: int, count: int, stages: StageMan
 				base_height = maxf(base_height, float(first.anchor) - 280.0)
 		if stage_number > 2 and not stages.transfer_window_open(stage_number, base_height / stages.stage_length(stage_number)):
 			continue
-		for coin_index in remaining:
-			var t := float(coin_index) / float(maxi(remaining - 1, 1))
+		var arc_count := mini(remaining, 3)
+		var last_arc_position := Vector2.ZERO
+		var has_arc_coin := false
+		for coin_index in arc_count:
+			var t := float(coin_index) / float(maxi(arc_count - 1, 1))
 			var height := base_height + rise * t + sin(PI * t) * ARC_HEIGHT_PX
 			var position := Vector2(lerpf(from_x, to_x, t), height)
+			if has_arc_coin and position.distance_to(last_arc_position) < MIN_COIN_SPACING_PX:
+				continue
 			# Keep collection eligibility on the source/destination branches.
 			var coin_route := from_route if t < 0.5 else to_route
+			var previous_size := result.size()
 			_append_coin(result, stage_number, position, coin_route, encounters, stages)
-		return result
+			if result.size() > previous_size:
+				last_arc_position = position
+				has_arc_coin = true
+		break
+	result = _filter_coin_spacing(result)
+	# Spend spare budget in whole vertical rows, exhausting witness corridors
+	# before looking on other lanes. All candidates still use _append_coin.
+	for index in encounters.size():
+		var current: Dictionary = encounters[index]
+		var start := HAZARD_CLEARANCE_PX if index == 0 else float(encounters[index - 1].occupancy[1]) + HAZARD_CLEARANCE_PX + 1.0
+		var end := stages.stage_length(stage_number) - HAZARD_CLEARANCE_PX if index == encounters.size() - 1 else float(current.occupancy[1])
+		_fill_vertical_rows(result, stage_number, count, _witness_x(stage_number, current.witness), start, end, encounters, stages)
+	for lane in 3:
+		var x := float(ScaleLock.TRUNK_SAFE_WORLD_X[lane]) if stage_number <= 2 else float(Balance.ROUTE_X[lane])
+		_fill_vertical_rows(result, stage_number, count, x, HAZARD_CLEARANCE_PX, stages.stage_length(stage_number) - HAZARD_CLEARANCE_PX, encounters, stages)
+	for index in result.size():
+		result[index].id = "S%03d-G%02d" % [stage_number, index + 1]
+	return result
+
+static func _fill_vertical_rows(result: Array, stage_number: int, count: int, x: float, start: float, end: float, encounters: Array, stages: StageManager) -> void:
+	var route := _route_at_x(stage_number, x, stages)
+	var height := start
+	while height + 2.0 * COIN_SPACING_PX <= end and count - result.size() >= 3:
+		var accepted := false
+		for row_count in range(mini(LINE_COUNT, count - result.size()), 2, -1):
+			if height + float(row_count - 1) * COIN_SPACING_PX > end:
+				continue
+			var row: Array = []
+			for coin_index in row_count:
+				_append_coin(row, stage_number, Vector2(x, height + float(coin_index) * COIN_SPACING_PX), route, encounters, stages)
+			if row.size() != row_count:
+				continue
+			var overlaps := false
+			for coin: Dictionary in row:
+				for existing: Dictionary in result:
+					if coin.position.distance_to(existing.position) < MIN_COIN_SPACING_PX:
+						overlaps = true
+						break
+				if overlaps:
+					break
+			if overlaps:
+				continue
+			result.append_array(row)
+			height += float(row_count) * COIN_SPACING_PX
+			accepted = true
+			break
+		if not accepted:
+			height += MIN_COIN_SPACING_PX * 0.25
+
+static func _filter_coin_spacing(coins: Array) -> Array:
+	var result: Array = []
+	for coin: Dictionary in coins:
+		var position: Vector2 = coin.position
+		var overlaps := false
+		for accepted: Dictionary in result:
+			if position.distance_to(accepted.position) < MIN_COIN_SPACING_PX:
+				overlaps = true
+				break
+		if not overlaps:
+			result.append(coin)
 	return result
 
 static func _witness_x(stage_number: int, witness: Variant) -> float:
