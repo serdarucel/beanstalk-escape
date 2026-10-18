@@ -403,6 +403,10 @@ func _sky_texture_middle_color(texture: Texture2D) -> Color:
 	return image.get_pixel(image.get_width() / 2, image.get_height() / 2)
 
 func _process(_delta: float) -> void:
+	var camera := player.get_node_or_null("Camera2D") as Camera2D
+	if camera != null:
+		camera.global_position.x = 0.0
+		camera.force_update_scroll()
 	_update_sky_clear_color()
 	if app_state == AppState.SHOP and meta_ui != null:
 		_refresh_shield_shop()
@@ -788,7 +792,7 @@ func _begin_intro() -> void:
 	golds.visible = false
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
-		camera.position = camera_play_position
+		_set_camera_position(camera, camera_play_position)
 		camera.offset = Vector2.ZERO
 	var spider_body := spider.get_node_or_null("Body") as CanvasItem
 	if spider_body != null:
@@ -805,9 +809,9 @@ func _update_intro(delta: float) -> void:
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
 		if intro_beat == 0:
-			camera.position = camera_play_position.lerp(INTRO_LOOK_UP_POSITION, progress * progress * (3.0 - 2.0 * progress))
+			_set_camera_position(camera, camera_play_position.lerp(INTRO_LOOK_UP_POSITION, progress * progress * (3.0 - 2.0 * progress)))
 		elif intro_beat == 2:
-			camera.position = camera_play_position
+			_set_camera_position(camera, camera_play_position)
 			if intro_t < 0.34:
 				var shake_strength := 9.0 * (1.0 - intro_t / 0.34)
 				camera.offset = Vector2.from_angle(intro_t * TAU * 18.0) * shake_strength
@@ -845,7 +849,7 @@ func _update_intro_presentation() -> void:
 	if intro_beat == 2:
 		var camera := player.get_node_or_null("Camera2D") as Camera2D
 		if camera != null:
-			camera.position = camera_play_position
+			_set_camera_position(camera, camera_play_position)
 		_layout_intro_text(get_viewport_rect().size)
 		audio.play_sfx("spider_scream")
 
@@ -879,7 +883,7 @@ func _finish_intro() -> void:
 	golds.visible = true
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
-		camera.position = camera_play_position
+		_set_camera_position(camera, camera_play_position)
 		camera.offset = Vector2.ZERO
 	var spider_body := spider.get_node_or_null("Body") as CanvasItem
 	if spider_body != null:
@@ -2297,15 +2301,19 @@ func _claim_daily_bonus() -> void:
 		return
 	_refresh_daily_card()
 
+func _set_camera_position(camera: Camera2D, local_position: Vector2) -> void:
+	camera.position = local_position
+	camera.global_position.x = 0.0
+
 func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	camera_play_position = Vector2(0.0, viewport_size.y * (0.5 - CAMERA_PLAYER_HEIGHT_RATIO))
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
 		if intro_active and intro_beat == 0:
 			var progress := clampf(intro_t / float(INTRO_BEAT_SECONDS[0]), 0.0, 1.0)
-			camera.position = camera_play_position.lerp(INTRO_LOOK_UP_POSITION, smoothstep(0.0, 1.0, progress))
+			_set_camera_position(camera, camera_play_position.lerp(INTRO_LOOK_UP_POSITION, smoothstep(0.0, 1.0, progress)))
 		elif not intro_active or intro_beat == 2:
-			camera.position = camera_play_position
+			_set_camera_position(camera, camera_play_position)
 	var width := maxf(viewport_size.x, 320.0)
 	var height := maxf(viewport_size.y, 320.0)
 	var portrait := width < height
@@ -2617,11 +2625,13 @@ func _layout_intro_guardian(viewport_size: Vector2) -> void:
 	var panel := $HUD/IntroText as Label
 	var camera := player.get_node("Camera2D") as Camera2D
 	var player_sprite := (player.get_node("Body") as PlayerVisual).sprite
+	camera.global_position.x = 0.0
 	camera.force_update_scroll()
 	var player_bounds := player_sprite.get_global_transform_with_canvas() * player_sprite.get_rect()
 	var player_top := panel.get_global_rect().end.y + 16.0
 	var canvas := get_viewport().get_canvas_transform()
 	camera.global_position += canvas.affine_inverse().basis_xform(Vector2(0.0, player_bounds.position.y - player_top))
+	camera.global_position.x = 0.0
 	camera.force_update_scroll()
 	player_bounds = player_sprite.get_global_transform_with_canvas() * player_sprite.get_rect()
 	var top := player_bounds.end.y + 24.0

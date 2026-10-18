@@ -4,13 +4,6 @@ extends Node2D
 const SKY_DAY := preload("res://assets/art/world/v2/sky_day.png")
 const SKY_GOLDEN := preload("res://assets/art/world/v3/sky_golden.png")
 const SKY_SUNSET := preload("res://assets/art/world/v2/sky_sunset.png")
-const FAR_STALKS := [
-	preload("res://assets/art/world/v3/far_stalks_far.png"),
-	preload("res://assets/art/world/v3/far_stalks_near.png"),
-]
-const PARALLAX_SPEEDS := [0.06, 0.14]
-const FAR_STRIP_WIDTHS := [150.0, 210.0]
-const FAR_OPACITIES := [0.50, 0.70]
 
 var player: PlayerController
 var stages: StageManager
@@ -82,25 +75,7 @@ func _draw() -> void:
 	else:
 		_draw_sky_cover(SKY_GOLDEN, view_rect)
 		_draw_sky_cover(SKY_SUNSET, view_rect, Color(1.0, 1.0, 1.0, sunset * 2.0 - 1.0))
-	_draw_far_vines(camera_top, sunset, view_rect)
 	# Lightning remains subtle without a permanent purple storm wash.
 	if stage_number >= 20:
 		var flash := pow(maxf(sin(Time.get_ticks_msec() * 0.0017 + float(stage_number)), 0.0), 18.0)
 		draw_rect(view_rect, Color(0.86, 0.83, 0.95, flash * 0.04))
-
-func _draw_far_vines(top_y: float, sunset: float, view_rect: Rect2) -> void:
-	for layer in 2:
-		# Preserve the painted RGB. Sunset only boosts channels, never darkens them.
-		var sunset_tint := Color(1.30, 1.04, 1.30) if layer == 0 else Color(1.45, 1.05, 1.12)
-		var tint := Color.WHITE.lerp(sunset_tint, sunset)
-		tint.a = FAR_OPACITIES[layer]
-		var strip_width: float = FAR_STRIP_WIDTHS[layer]
-		var source: Texture2D = FAR_STALKS[layer]
-		var tile_height := strip_width * float(source.get_height()) / float(source.get_width())
-		var first_y := view_rect.position.y + fposmod(-top_y * PARALLAX_SPEEDS[layer], tile_height) - tile_height
-		# Matched top/bottom texture edges share one continuous parallax phase.
-		for tile in ceili(view_rect.size.y / tile_height) + 1:
-			var tile_y := first_y + float(tile) * tile_height
-			for strip_x in [view_rect.position.x, view_rect.end.x - strip_width]:
-				var destination := Rect2(strip_x, tile_y, strip_width, tile_height)
-				draw_texture_rect(source, destination, false, tint)
