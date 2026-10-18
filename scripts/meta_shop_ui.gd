@@ -31,7 +31,6 @@ var mode := "SHOP"
 var active_tab := "CHARACTERS"
 var preview_character_id := ""
 var preview_item: Dictionary = {}
-var active_gender := "MALE"
 var panel: Panel
 var title_label: Label
 var tabs: HBoxContainer
@@ -67,7 +66,6 @@ func open_shop() -> void:
 func open_character_select() -> void:
 	mode = "SELECT"
 	preview_back = false
-	active_gender = "MALE" if str(economy.shop.selected_character).begins_with("M") else "FEMALE"
 	visible = true
 	refresh()
 	call_deferred("_focus_start_button")
@@ -207,6 +205,11 @@ func _layout() -> void:
 	scroll.position = Vector2(8, 56) if map_mode else Vector2(preview_width + 16, 92)
 	scroll.size = Vector2(width - 16 if map_mode else width - preview_width - 24, maxf(footer_y - scroll.position.y - 6.0, 120.0))
 	grid.columns = (6 if scroll.size.x >= 720.0 else 3) if map_mode else (3 if scroll.size.x >= 450.0 else 2)
+	if mode == "SELECT" or (mode == "SHOP" and active_tab == "CHARACTERS"):
+		grid.columns = maxi(economy.character_catalog().size(), 1)
+		var cards_width := minf(scroll.size.x, grid.get_combined_minimum_size().x)
+		scroll.position.x += (scroll.size.x - cards_width) * 0.5
+		scroll.size.x = cards_width
 	tabs.size = Vector2(width - 16, 38)
 
 func refresh() -> void:
@@ -237,8 +240,7 @@ func _cycle_character(direction: int) -> void:
 	var candidates: Array[String] = []
 	for character_id_value in economy.character_catalog():
 		var character_id := str(character_id_value)
-		var data: Dictionary = economy.character_catalog()[character_id]
-		if str(data.gender) == active_gender and economy.character_available(character_id):
+		if economy.character_available(character_id):
 			candidates.append(character_id)
 	if candidates.is_empty():
 		return
@@ -252,28 +254,18 @@ func _rebuild_tabs() -> void:
 	for child in tabs.get_children():
 		tabs.remove_child(child)
 		child.queue_free()
-	tabs.visible = mode != "MAP"
-	if mode == "MAP":
+	tabs.visible = mode == "SHOP"
+	if mode != "SHOP":
 		return
-	if mode == "SELECT":
-		for gender in ["MALE", "FEMALE"]:
-			var button := Button.new()
-			button.text = gender
-			button.toggle_mode = true
-			button.button_pressed = active_gender == gender
-			button.custom_minimum_size = Vector2(140, 36)
-			button.pressed.connect(func(): active_gender = gender; refresh())
-			tabs.add_child(button)
-	else:
-		for slot in SLOTS:
-			var button := Button.new()
-			button.text = slot
-			button.toggle_mode = true
-			button.button_pressed = active_tab == slot
-			button.custom_minimum_size = Vector2(92, 36)
-			button.add_theme_font_size_override("font_size", 12)
-			button.pressed.connect(func(): active_tab = slot; refresh())
-			tabs.add_child(button)
+	for slot in SLOTS:
+		var button := Button.new()
+		button.text = slot
+		button.toggle_mode = true
+		button.button_pressed = active_tab == slot
+		button.custom_minimum_size = Vector2(92, 36)
+		button.add_theme_font_size_override("font_size", 12)
+		button.pressed.connect(func(): active_tab = slot; refresh())
+		tabs.add_child(button)
 
 func _rebuild_cards() -> void:
 	for child in grid.get_children():
@@ -285,8 +277,6 @@ func _rebuild_cards() -> void:
 	elif mode == "SELECT":
 		for character_id in economy.character_catalog():
 			var data: Dictionary = economy.character_catalog()[character_id]
-			if mode == "SELECT" and str(data.gender) != active_gender:
-				continue
 			grid.add_child(_character_card(character_id, data))
 	else:
 		if active_tab == "CHARACTERS":

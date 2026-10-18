@@ -3,8 +3,10 @@ extends RefCounted
 
 signal profile_loaded(profile: Dictionary)
 
-const SAVE_VERSION := 6
+const SAVE_VERSION := 7
 const DEFAULT_PATH := "user://profile_v1.json"
+const RETIRED_CHARACTER_REFUNDS := {"M2": 3000, "M3": 7000, "F2": 3000, "F3": 7000}
+const RETIRED_CHARACTER_SELECTIONS := {"M2": "M1", "M3": "M1", "F2": "F1", "F3": "F1"}
 const LEGACY_PET_IDS := {
 	"pet_squirrel": "fairy_leaf",
 	"pet_ladybug": "fairy_flower",
@@ -52,6 +54,7 @@ var bridge_write_dirty := false
 var hair_refund_migrated := false
 var emblem_refund_migrated := false
 var trail_refund_migrated := false
+var character_refund_migrated := false
 # Consumed by the leaderboard adapter so the result screen records each run once.
 var pending_run_score: Dictionary = {}
 
@@ -76,8 +79,9 @@ func load_profile() -> Dictionary:
 	hair_refund_migrated = false
 	emblem_refund_migrated = false
 	trail_refund_migrated = false
+	character_refund_migrated = false
 	profile = _sanitize_profile(parsed as Dictionary)
-	if hair_refund_migrated or emblem_refund_migrated or trail_refund_migrated:
+	if hair_refund_migrated or emblem_refund_migrated or trail_refund_migrated or character_refund_migrated:
 		_write_local_profile()
 	return profile.duplicate(true)
 
@@ -372,6 +376,7 @@ func _write_local_profile() -> bool:
 func _default_profile() -> Dictionary:
 	return {
 		"version": SAVE_VERSION,
+		"character_refund_v7_done": true,
 		"best_score": 0,
 		"hints_seen": [],
 		"leaderboard_local": [],
@@ -421,8 +426,12 @@ func _sanitize_shop(value: Variant) -> Dictionary:
 	var owned_value: Variant = source.get("owned", [])
 	if owned_value is Array:
 		for item in owned_value:
+			if item is not String:
+				continue
 			var item_id := str(item).to_upper() if str(item).length() == 2 else str(item)
 			item_id = str(LEGACY_PET_IDS.get(item_id, item_id))
+			if RETIRED_CHARACTER_REFUNDS.has(item_id):
+				continue
 			if not item_id.begins_with("face_") and not RETIRED_HAIR_REFUNDS.has(item_id) and not item_id.begins_with("emblem_") and not item_id.begins_with("trail_") and not result.owned.has(item_id):
 				result.owned.append(item_id)
 	var equipped_value: Variant = source.get("equipped", {})
@@ -432,7 +441,8 @@ func _sanitize_shop(value: Variant) -> Dictionary:
 			var equipped_id := str(equipped_value.get(slot, ""))
 			result.equipped[slot] = str(LEGACY_PET_IDS.get(equipped_id, equipped_id)) if slot == "PET" else equipped_id
 	var selected := str(source.get("selected_character", "M1")).to_upper()
-	result.selected_character = selected if result.owned.has(selected) else "M1"
+	selected = str(RETIRED_CHARACTER_SELECTIONS.get(selected, selected))
+	result.selected_character = selected if selected in ["M1", "F1"] else "M1"
 	return result
 
 func _sanitize_progression(value: Variant) -> Dictionary:
@@ -465,13 +475,14 @@ func _on_bridge_profile_loaded(success: bool, value: Variant) -> void:
 		hair_refund_migrated = false
 		emblem_refund_migrated = false
 		trail_refund_migrated = false
+		character_refund_migrated = false
 		var bridge_profile := _sanitize_profile(value)
 		var local_seq := int(profile.get("meta", {}).get("save_seq", 0))
 		var bridge_seq := int(bridge_profile.get("meta", {}).get("save_seq", 0))
 		if bridge_seq >= local_seq:
 			pending_bridge_write = false
 			profile = bridge_profile
-			if hair_refund_migrated or emblem_refund_migrated or trail_refund_migrated:
+			if hair_refund_migrated or emblem_refund_migrated or trail_refund_migrated or character_refund_migrated:
 				_write_profile()
 			else:
 				_write_local_profile()
@@ -481,6 +492,24 @@ func _on_bridge_profile_loaded(success: bool, value: Variant) -> void:
 	if pending_bridge_write:
 		pending_bridge_write = false
 		_queue_bridge_write()
+
+func _migrate_characters_v7(value: Dictionary) -> int:
+	if value.get("character_refund_v7_done", false) == true:
+		return 0
+	character_refund_migrated = true
+	var source_shop: Variant = value.get("shop", {})
+	var source_owned: Variant = source_shop.get("owned", []) if source_shop is Dictionary else []
+	var refund := 0
+	if source_owned is Array:
+		var refunded := {}
+		for item in source_owned:
+			if item is not String:
+				continue
+			var character_id := str(item).to_upper()
+			if RETIRED_CHARACTER_REFUNDS.has(character_id) and not refunded.has(character_id):
+				refund += int(RETIRED_CHARACTER_REFUNDS[character_id])
+				refunded[character_id] = true
+	return refund
 
 func _sanitize_profile(value: Dictionary) -> Dictionary:
 	var result := _default_profile()
@@ -508,7 +537,7 @@ func _sanitize_profile(value: Dictionary) -> Dictionary:
 			result.best_score = maxi(result.best_score, int(result.leaderboard_local[0].score))
 	var meta: Dictionary = value.get("meta", {}) if value.get("meta", {}) is Dictionary else {}
 	var refund_done := bool(meta.get("hair_refund_done", false))
-	var refund_gold := 0
+	var refund_gold := _migrate_characters_v7(value)
 	if not refund_done:
 		var source_shop: Variant = value.get("shop", {})
 		var source_owned: Variant = source_shop.get("owned", []) if source_shop is Dictionary else []

@@ -33,11 +33,7 @@
   "restart_mode": "stage",
   "characters": {
     "M1": {"gender": "MALE", "name": "CLASSIC ADVENTURER", "level": 1, "price": 0},
-    "M2": {"gender": "MALE", "name": "CLOUD SCOUT", "level": 3, "price": 3000},
-    "M3": {"gender": "MALE", "name": "FOREST RUNNER", "level": 5, "price": 7000},
-    "F1": {"gender": "FEMALE", "name": "CLASSIC CLIMBER", "level": 1, "price": 0},
-    "F2": {"gender": "FEMALE", "name": "SKY EXPLORER", "level": 3, "price": 3000},
-    "F3": {"gender": "FEMALE", "name": "VINE GUARDIAN", "level": 5, "price": 7000}
+    "F1": {"gender": "FEMALE", "name": "CLASSIC CLIMBER", "level": 1, "price": 0}
   },
   "cosmetic_prices": {"COMMON": 1500, "RARE": 4000, "EPIC": 9000},
   "cosmetic_levels": {"COMMON": 1, "RARE": 3, "EPIC": 5},
