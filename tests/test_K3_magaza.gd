@@ -30,12 +30,18 @@ func portrait_scale(icon: TextureRect) -> float:
 	# KEEP_ASPECT_CENTERED draws the full image at this uniform scale.
 	# Visible alpha height cancels: (alpha_height * scale) / alpha_height.
 	var fit := minf(icon.size.x / icon.texture.get_width(), icon.size.y / icon.texture.get_height())
-	var screen := icon.get_screen_transform()
-	return fit * maxf(screen.x.length(), screen.y.length())
+	return fit * device_scale(icon)
+
+func device_scale(item: CanvasItem) -> float:
+	# Headless get_screen_transform omits window stretch. Derive physical
+	# pixels independently from the requested window and logical viewport.
+	var canvas := item.get_global_transform_with_canvas()
+	var viewport_size := root.get_visible_rect().size
+	var pixels := Vector2(root.size) / viewport_size
+	return maxf((canvas.x * pixels).length(), (canvas.y * pixels).length())
 
 func preview_scale(sprite: Sprite2D) -> float:
-	var screen := sprite.get_screen_transform()
-	return maxf(screen.x.length(), screen.y.length())
+	return device_scale(sprite)
 
 func scale_ok(value: float) -> bool:
 	return is_finite(value) and value > 0.0 and value <= 2.0 + 0.0001
@@ -88,8 +94,9 @@ func _run() -> void:
 		main._show_shop()
 		await settle()
 		print("MEASURE window=%s viewport=%s screen_scale=%s" % [root.size, root.get_visible_rect().size, ui.get_screen_transform().get_scale()])
-		check("%s two character cards" % dimensions, ui.grid.get_child_count() == 2)
-		for card in ui.grid.get_children():
+		var cards: Array[Node] = ui.grid.get_children().filter(func(node): return node is PanelContainer)
+		check("%s two character cards" % dimensions, cards.size() == 2)
+		for card in cards:
 			var icons: Array[Node] = card.find_children("*", "TextureRect", true, false)
 			check("%s card portrait exists" % dimensions, icons.size() == 1)
 			if icons.size() != 1:

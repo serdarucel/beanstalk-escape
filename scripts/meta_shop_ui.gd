@@ -6,6 +6,17 @@ signal run_started
 
 const SLOTS := ["CHARACTERS", "OUTFIT", "PET"]
 
+static func _device_pixels_per_unit(item: CanvasItem) -> float:
+	var screen := item.get_screen_transform()
+	var screen_scale := maxf(screen.x.length(), screen.y.length())
+	# Headless windows omit stretch from get_screen_transform(). Keep the
+	# physical window / logical viewport ratio as an independent lower bound.
+	var window := item.get_window()
+	var viewport_size := window.get_visible_rect().size
+	var pixels := Vector2(window.size) / viewport_size.max(Vector2.ONE)
+	var canvas := item.get_global_transform_with_canvas()
+	return maxf(screen_scale, maxf((canvas.x * pixels).length(), (canvas.y * pixels).length()))
+
 class PortraitSlot:
 	extends Control
 
@@ -25,8 +36,7 @@ class PortraitSlot:
 		if portrait.texture == null:
 			return
 		# Screen transform includes viewport stretch, card scaling and device pixels.
-		var screen := get_screen_transform()
-		var pixels_per_unit := maxf(screen.x.length(), screen.y.length())
+		var pixels_per_unit := MetaShopUI._device_pixels_per_unit(self)
 		var limit := portrait.texture.get_size() * 2.0 / maxf(pixels_per_unit, 0.001)
 		portrait.size = Vector2(minf(size.x, limit.x), minf(size.y, limit.y))
 		portrait.position = (size - portrait.size) * 0.5
@@ -292,8 +302,7 @@ func _fit_preview() -> void:
 	if preview.sprite == null or preview.sprite.texture == null:
 		return
 	var sprite := preview.sprite
-	var screen := preview_host.get_screen_transform()
-	var pixels_per_unit := maxf(screen.x.length(), screen.y.length())
+	var pixels_per_unit := _device_pixels_per_unit(preview_host)
 	var source_scale := maxf(absf(sprite.scale.x), absf(sprite.scale.y))
 	var source_rect := sprite.get_rect()
 	var body_size := source_rect.size * source_scale
