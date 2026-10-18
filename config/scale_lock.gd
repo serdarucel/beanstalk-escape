@@ -27,12 +27,9 @@ const SUPPORT_OFFSET_LIMIT := 12.0
 const VINE_VISUAL_AMPLITUDE := 12.0
 const VINE_VISUAL_WAVELENGTH := 420.0
 
-static func vine_visual_offset(lane: int, world_y: float) -> float:
-	# Rendering-only centerline shared by supports and their foreground actors.
-	# Gameplay remains pinned to ROUTE_X / TRUNK_SAFE_WORLD_X.
-	var phase := float(clampi(lane, 0, 2)) * 2.17
-	return sin(world_y * TAU / VINE_VISUAL_WAVELENGTH + phase) * VINE_VISUAL_AMPLITUDE \
-		+ sin(world_y * TAU / 690.0 + phase * 0.47) * 3.0
+static func vine_visual_offset(_lane: int, _world_y: float) -> float:
+	# v4 vines and their foreground actors share straight ROUTE_X centerlines.
+	return 0.0
 
 static func measurements() -> Dictionary:
 	return {
