@@ -1049,7 +1049,7 @@ func _on_stage_completed(stage_number: int) -> void:
 	last_stage_gold_reward = int(reward.gold)
 	reward_toast_remaining = 0.0
 	double_reward_remaining = 0.0
-	$HUD/RewardToast.text = "+%d GOLD  +%d XP" % [reward.gold, reward.xp]
+	$HUD/RewardToast.text = "+%d GOLD" % reward.gold
 	_reset_stage_ghost(stage_number + 1)
 
 func try_time_wings() -> bool:
@@ -2066,9 +2066,11 @@ func _setup_hud() -> void:
 	var flight_layer := Node2D.new()
 	flight_layer.name = "GoldFlights"
 	$HUD.add_child(flight_layer)
-	_add_label("XPStatus", Vector2(690, 87), "LV 1 · XP 0/100", 14)
+	_add_label("XPStatus", Vector2(690, 87), "", 14)
+	$HUD/XPStatus.visible = false
 	var xp_bar := ProgressBar.new()
 	xp_bar.name = "XPBar"
+	xp_bar.visible = false
 	xp_bar.show_percentage = false
 	xp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$HUD.add_child(xp_bar)
@@ -2857,8 +2859,8 @@ func _update_hud() -> void:
 	$HUD/Lives.visible = normal_playing
 	var balance_visible := result_visible or app_state in [AppState.MENU, AppState.SHOP]
 	$HUD/GoldStatus.visible = balance_visible
-	$HUD/XPStatus.visible = balance_visible
-	$HUD/XPBar.visible = balance_visible
+	$HUD/XPStatus.visible = false
+	$HUD/XPBar.visible = false
 	$HUD/RewardToast.visible = false
 	$HUD/LevelUpCard.visible = false
 	_update_mission_panel()
@@ -2899,9 +2901,7 @@ func _update_hud() -> void:
 	_update_lives_hud()
 	var meta := economy.snapshot()
 	$HUD/GoldStatus.text = "GOLD %d" % meta.gold
-	$HUD/XPStatus.text = "LV %d · XP %d/%d" % [meta.level, meta.xp, meta.xp_threshold]
-	$HUD/XPBar.max_value = meta.xp_threshold
-	$HUD/XPBar.value = meta.xp
+	$HUD/XPStatus.text = ""
 	if result_visible:
 		$HUD/Stats.text = _stats_text()
 		$HUD/Complete.text = "%s COMPLETE" % mode

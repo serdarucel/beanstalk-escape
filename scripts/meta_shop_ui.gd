@@ -6,6 +6,31 @@ signal run_started
 
 const SLOTS := ["CHARACTERS", "OUTFIT", "PET"]
 
+class PortraitSlot:
+	extends Control
+
+	var portrait := TextureRect.new()
+
+	func _ready() -> void:
+		portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		portrait.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		add_child(portrait)
+		_fit()
+
+	func _process(_delta: float) -> void:
+		_fit()
+
+	func _fit() -> void:
+		if portrait.texture == null:
+			return
+		# Screen transform includes viewport stretch, card scaling and device pixels.
+		var screen := get_screen_transform()
+		var pixels_per_unit := maxf(screen.x.length(), screen.y.length())
+		var limit := portrait.texture.get_size() * 2.0 / maxf(pixels_per_unit, 0.001)
+		portrait.size = Vector2(minf(size.x, limit.x), minf(size.y, limit.y))
+		portrait.position = (size - portrait.size) * 0.5
+
 class TurnIcon:
 	extends Control
 
@@ -88,6 +113,7 @@ func close() -> void:
 func _process(delta: float) -> void:
 	if visible and preview != null:
 		preview.preview_tick(delta)
+		_fit_preview()
 
 func _input(event: InputEvent) -> void:
 	if not visible or mode != "SELECT" or not event.is_pressed() or event.is_echo():
@@ -260,13 +286,31 @@ func _layout() -> void:
 			scroll.position.x += (scroll.size.x - cards_size.x) * 0.5
 		scroll.size = cards_size
 	tabs.size = Vector2(width - 16, 38)
+	_fit_preview()
+
+func _fit_preview() -> void:
+	if preview.sprite == null or preview.sprite.texture == null:
+		return
+	var sprite := preview.sprite
+	var screen := preview_host.get_screen_transform()
+	var pixels_per_unit := maxf(screen.x.length(), screen.y.length())
+	var source_scale := maxf(absf(sprite.scale.x), absf(sprite.scale.y))
+	var source_rect := sprite.get_rect()
+	var body_size := source_rect.size * source_scale
+	var fit := minf(preview_host.size.x / maxf(body_size.x, 1.0), preview_host.size.y / maxf(body_size.y + 10.0, 1.0))
+	var limit := 2.0 / maxf(source_scale * pixels_per_unit, 0.001)
+	preview.scale = Vector2.ONE * minf(preview.scale.y, minf(fit, limit))
+	var center := source_rect.get_center()
+	if not preview_back:
+		center.y += 15.0 # Visible front bounds: (59, 42) to (197, 244).
+	preview.position = preview_host.size * 0.5 - (sprite.position + center * sprite.scale) * preview.scale
 
 func refresh() -> void:
 	_sync_preview_tab(active_tab)
 	if economy == null:
 		return
 	title_label.text = "STAGE MAP" if mode == "MAP" else ("CHARACTER SELECT" if mode == "SELECT" else "SHOP")
-	gold_label.text = "GOLD %d  ·  LV %d" % [economy.gold, economy.level]
+	gold_label.text = "GOLD %d" % economy.gold
 	start_button.visible = mode == "SELECT"
 	double_treasure_button.visible = mode == "MAP" and pending_double_gold > 0 and platform_services != null and platform_services.is_rewarded_supported()
 	if double_treasure_button.visible:
@@ -429,15 +473,17 @@ func _card_body(card: PanelContainer) -> VBoxContainer:
 	return card.get_child(0) as VBoxContainer
 
 func _character_card(character_id: String, data: Dictionary) -> Control:
-	var card := _base_card("%s · %s" % [character_id, data.name], "LV %d · %d GOLD" % [int(data.level), int(data.price)])
+	var card := _base_card("%s · %s" % [character_id, data.name], "%d GOLD" % int(data.price))
 	var body := _card_body(card)
-	var portrait := TextureRect.new()
-	portrait.custom_minimum_size = Vector2(112, 104)
-	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	var path := "res://assets/art/character_frames/%s/front.png" % character_id.to_lower()
-	if ResourceLoader.exists(path): portrait.texture = load(path)
-	body.add_child(portrait)
+	var slot := PortraitSlot.new()
+	slot.custom_minimum_size = Vector2(112, 104)
+	var outfit := str(economy.shop.equipped.get("OUTFIT", "")).trim_prefix("outfit_")
+	var kind := str(PlayerVisual.EXPLORER_KINDS.get(character_id, "erkek"))
+	var path := "%s/%s/%s/front.png" % [PlayerVisual.EXPLORER_ROOT, kind, "base" if outfit.is_empty() else outfit]
+	if not ResourceLoader.exists(path):
+		path = "%s/%s/base/front.png" % [PlayerVisual.EXPLORER_ROOT, kind]
+	slot.portrait.texture = load(path)
+	body.add_child(slot)
 	var button := Button.new()
 	button.custom_minimum_size.y = 36
 	var owned: bool = economy.shop.owned.has(character_id)
@@ -450,7 +496,7 @@ func _character_card(character_id: String, data: Dictionary) -> Control:
 		button.text = "BUY · %d" % int(data.price)
 		button.pressed.connect(func(): economy.buy(character_id); refresh())
 	else:
-		button.text = reason
+		button.text = _lock_text(reason)
 		button.disabled = true
 	body.add_child(button)
 	card.gui_input.connect(func(event):
@@ -465,7 +511,7 @@ func _cosmetic_card(item: Dictionary) -> Control:
 	var is_pet := slot == "PET"
 	var is_outfit := slot == "OUTFIT"
 	var price_text := source if is_outfit and not source.is_empty() else "%d GOLD" % int(item.price)
-	var subtitle := "%s\nLV %d · %s" % [str(item.get("effect_name", "")), int(item.level), price_text] if is_pet or is_outfit else (source if not source.is_empty() else "%s · LV %d" % [item.rarity, int(item.level)])
+	var subtitle := "%s\n%s" % [str(item.get("effect_name", "")), price_text] if is_pet or is_outfit else (source if not source.is_empty() else str(item.rarity))
 	var card := _base_card(str(item.name), subtitle)
 	var body := _card_body(card)
 	var icon := TextureRect.new()
@@ -490,7 +536,7 @@ func _cosmetic_card(item: Dictionary) -> Control:
 		button.text = "BUY · %d" % int(item.price)
 		button.pressed.connect(func(): economy.buy(item_id); refresh())
 	else:
-		button.text = reason
+		button.text = _lock_text(reason)
 		button.disabled = true
 	body.add_child(button)
 	card.gui_input.connect(func(event):
@@ -498,6 +544,9 @@ func _cosmetic_card(item: Dictionary) -> Control:
 			_preview_item(item))
 	button.focus_entered.connect(func(): _preview_item(item))
 	return card
+
+func _lock_text(reason: String) -> String:
+	return "LOCKED" if reason.begins_with("LV ") else reason
 
 func _preview_character(character_id: String) -> void:
 	preview_character_id = character_id
@@ -517,6 +566,7 @@ func _apply_preview() -> void:
 		preview.show_back_preview()
 	else:
 		preview.show_front_preview()
+	_fit_preview()
 	view_toggle_button.text = "TURN"
 	if player_visual != null:
 		player_visual.set_skin(str(economy.shop.selected_character))
