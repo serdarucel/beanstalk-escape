@@ -26,6 +26,7 @@ const FRAME_RATE := 8.0
 const ART_SCALE := 0.49
 const BASE_Y := -7.2
 const EXPLORER_SCALE := 238.0 * ART_SCALE / 201.0
+const GAMEPLAY_VISUAL_SCALE := 1.9
 const EXPLORER_FOOT_Y := BASE_Y + (269.0 - 300.0 * 0.5) * ART_SCALE
 const WINGS_TARGET_WIDTH := ScaleLock.CHARACTER_WIDTH * 1.8
 const TIME_WINGS_VISIBLE_RATIO := 1344.0 / 1415.0
@@ -42,6 +43,7 @@ const FIRE_TRAIL_ROOT := Vector2(0, -12) + (FIRE_WING_ROOT - Vector2(256, 256)) 
 const PET_PREVIEW_HEIGHT := 60.0
 const PET_PREVIEW_BOUNDS := {}
 
+var gameplay_visual_mult := 1.0
 var skin_id := "M1"
 var mode := "hang"
 var frame_name := "hang"
@@ -86,6 +88,8 @@ var _explorer_previous_app_state := -1
 var _explorer_respawning := false
 
 func _ready() -> void:
+	if get_parent() is PlayerController:
+		gameplay_visual_mult = GAMEPLAY_VISUAL_SCALE
 	_build_visual()
 	_load_skin(OS.get_environment("BEANSTALK_SKIN"))
 	_set_frame("hang")
@@ -108,7 +112,7 @@ func _process(delta: float) -> void:
 		_time_wings_reveal = minf(_time_wings_reveal + delta / TIME_WINGS_REVEAL_SECONDS, 1.0)
 		var reveal := smoothstep(0.0, 1.0, _time_wings_reveal)
 		var wing_pulse := sin(Time.get_ticks_msec() * 0.010) * 0.01
-		var reveal_scale := _time_wings_target_scale * lerpf(0.70, 1.0, reveal)
+		var reveal_scale := _time_wings_target_scale * gameplay_visual_mult * lerpf(0.70, 1.0, reveal)
 		time_wings.scale = reveal_scale * Vector2(1.0 + wing_pulse, 1.0 - wing_pulse * 0.5)
 		time_wings.modulate.a = reveal
 		time_wings.visible = true
@@ -121,7 +125,7 @@ func _process(delta: float) -> void:
 	for trail in fire_trails: trail.visible = player.fire_wings_active
 	if fire_wings.visible:
 		var fire_pulse := sin(Time.get_ticks_msec() * 0.014) * 0.01
-		fire_wings.scale = FIRE_WINGS_TARGET_SCALE * Vector2(1.0 + fire_pulse, 1.0 - fire_pulse * 0.35)
+		fire_wings.scale = FIRE_WINGS_TARGET_SCALE * gameplay_visual_mult * Vector2(1.0 + fire_pulse, 1.0 - fire_pulse * 0.35)
 		for index in fire_trails.size():
 			fire_trails[index].scale = fire_wings.scale / FIRE_TRAIL_REFERENCE_SCALE
 			fire_trails[index].modulate.a = 0.55 + 0.18 * sin(Time.get_ticks_msec() * 0.018 + float(index) * PI)
@@ -550,12 +554,12 @@ func _load_explorer_art(outfit_id: String) -> void:
 	var pivot: Array = _explorer_meta["pivot"]
 	var cell_size := Vector2(float(_explorer_meta["frame_w"]), float(_explorer_meta["frame_h"]))
 	sprite.offset = cell_size * 0.5 - Vector2(float(pivot[0]), float(pivot[1]))
-	sprite.scale = Vector2.ONE * EXPLORER_SCALE
+	sprite.scale = Vector2.ONE * EXPLORER_SCALE * gameplay_visual_mult
 	sprite.position = _sprite_base_position()
 
 func _explorer_source_to_local(point: Vector2) -> Vector2:
 	var pivot: Array = _explorer_meta["pivot"]
-	return sprite.position + (point - Vector2(float(pivot[0]), float(pivot[1]))) * EXPLORER_SCALE
+	return sprite.position + (point - Vector2(float(pivot[0]), float(pivot[1]))) * EXPLORER_SCALE * gameplay_visual_mult
 
 func _update_explorer_anchors() -> void:
 	var frames: Array = _explorer_meta["anchors"][frame_name]
@@ -584,7 +588,7 @@ func _update_explorer_anchors() -> void:
 	var pivot: Array = _explorer_meta["pivot"]
 	var body_top := head_center.y - head_width * 0.5
 	var body_height := maxf(float(pivot[1]) - body_top, head_width)
-	var effect_size := Vector2(head_width * 1.65, body_height) * EXPLORER_SCALE
+	var effect_size := Vector2(head_width * 1.65, body_height) * EXPLORER_SCALE * gameplay_visual_mult
 	var effect_center := _explorer_source_to_local(Vector2(head_center.x, body_top + body_height * 0.5))
 	if outfit_aura != null:
 		outfit_aura.position = effect_center
