@@ -96,7 +96,7 @@ func far_gap() -> float:
 	return maxf(below_player + 24.0, Balance.DANGER_GAP)
 
 func audio_level() -> float:
-	return 1.0 - clampf(distance_to_player() / far_gap(), 0.0, 1.0)
+	return 1.0 - clampf((distance_to_player() - Balance.DANGER_GAP) / maxf(far_gap() - Balance.DANGER_GAP, 1.0), 0.0, 1.0)
 
 func _start_gap_transition(target_gap: float, seconds: float) -> void:
 	_gap_transition_from = maxf(distance_to_player(), Balance.DANGER_GAP)
