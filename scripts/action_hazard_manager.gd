@@ -148,6 +148,8 @@ class ActionHazard extends Node2D:
 	var parts: Array[Texture2D] = []
 	var world_visual: Node2D
 	const OUTLINE := Color("302820")
+	const HALO := Color("fff1c7")
+	static var silhouettes: Dictionary = {}
 
 	func visual_x(y: float) -> float:
 		if world_visual != null:
@@ -159,17 +161,46 @@ class ActionHazard extends Node2D:
 
 	func lane_width(y: float) -> float:
 		if world_visual != null:
-			return float(world_visual.call("_branch_painted_width", route, y))
-		return ScaleLock.BRANCH_WIDTH
+			var neighbor := route + 1 if route < 2 else route - 1
+			return absf(float(world_visual.call("_branch_visual_x", neighbor, y)) - visual_x(y))
+		return absf(float(Balance.ROUTE_X[1]) - float(Balance.ROUTE_X[0]))
+
+	func visible_bounds(source: Texture2D) -> Rect2:
+		if not silhouettes.has(source):
+			var image := source.get_image()
+			if image.is_compressed():
+				image.decompress()
+			var bounds := Rect2(image.get_used_rect())
+			# A white alpha mask gives both borders a solid color, independent of art RGB.
+			for row in image.get_height():
+				for column in image.get_width():
+					image.set_pixel(column, row, Color(1, 1, 1, image.get_pixel(column, row).a))
+			silhouettes[source] = [bounds, ImageTexture.create_from_image(image)]
+		return silhouettes[source][0]
+
+	func screen_pixel() -> float:
+		var basis := get_global_transform_with_canvas()
+		return 1.0 / maxf(minf(basis.x.length(), basis.y.length()), 0.001)
+
+	func part_scale(source: Texture2D, y: float, fraction: float) -> float:
+		return lane_width(y) * fraction / maxf(visible_bounds(source).size.x * absf(cos(visual_angle(y))), 1.0)
+
+	func draw_bordered(source: Texture2D, rect: Rect2) -> void:
+		visible_bounds(source)
+		var mask: Texture2D = silhouettes[source][1]
+		var pixel := screen_pixel()
+		for layer in [3.2, 2.1]:
+			for index in 16:
+				var offset := Vector2.from_angle(TAU * float(index) / 16.0) * layer * pixel
+				draw_texture_rect(mask, Rect2(rect.position + offset, rect.size), false, HALO if layer == 3.2 else OUTLINE)
+		draw_texture_rect(source, rect, false)
 
 	func sprite_size() -> Vector2:
-		var width := lane_width(position.y) * 1.1
-		if kind == "WEB":
-			width = maxf(width, 18.0 * texture.get_width() / texture.get_height())
-		return texture.get_size() * (width / texture.get_width())
+		return texture.get_size() * part_scale(texture, position.y, 0.9)
 
 	func gap_attachment_y(upper: bool) -> float:
-		var reach := 378.0 * lane_width(position.y) / 224.0 + 18.0
+		var painted_width := float(world_visual.call("_branch_painted_width", route, position.y)) if world_visual != null else ScaleLock.BRANCH_WIDTH
+		var reach := 378.0 * painted_width / 224.0 + 18.0
 		return position.y + (-reach if upper else reach)
 
 	func _draw_painted() -> void:
@@ -180,43 +211,37 @@ class ActionHazard extends Node2D:
 			"K":
 				for index in 2:
 					var attach_y := gap_attachment_y(index == 0)
-					var scale := lane_width(attach_y) / 224.0
+					var painted_width := float(world_visual.call("_branch_painted_width", route, attach_y)) if world_visual != null else ScaleLock.BRANCH_WIDTH
+					var scale := Vector2(part_scale(parts[index], attach_y, 0.9), painted_width / 224.0)
 					draw_set_transform(Vector2(visual_x(attach_y) - position.x, attach_y - y), visual_angle(attach_y))
-					var pivot := Vector2(128.0, 6.0 if index == 0 else 378.0)
-					draw_texture_rect(parts[index], Rect2(-pivot * scale, parts[index].get_size() * scale), false)
+					var bounds := visible_bounds(parts[index])
+					var pivot := Vector2(bounds.get_center().x, 6.0 if index == 0 else 378.0)
+					draw_bordered(parts[index], Rect2(-pivot * scale, parts[index].get_size() * scale))
 			"M":
-				var scale := width / 224.0
-				var knot := Vector2(-width * 0.5, -53.0)
-				draw_texture_rect(parts[0], Rect2(knot - Vector2(310, 130) * scale, parts[0].get_size() * scale), false)
-				var rope_start := knot + Vector2(2, 102) * scale
-				var stone_scale := width * 0.85 / 256.0
+				var scale := part_scale(parts[0], y, 0.9)
+				var stone_scale := part_scale(parts[2], y, 0.8)
 				var stone_center := Vector2(sin(clock * 2.8) * 18.0, 0.0)
-				var rotation := (stone_center - rope_start).angle() - PI * 0.5
-				var attachment := stone_center + (Vector2(0, -99) * stone_scale).rotated(rotation)
+				# Keep the stone upright so its opaque width is stable throughout the swing.
+				var stone_bounds := visible_bounds(parts[2])
+				var stone_rect := Rect2(stone_center - stone_bounds.get_center() * stone_scale, parts[2].get_size() * stone_scale)
+				var attachment := stone_center - Vector2(0, stone_bounds.size.y * 0.5 * stone_scale)
+				var rope_start := Vector2(-width * 0.35, attachment.y - 53.0)
+				var anchor_origin := rope_start - Vector2(312, 232) * scale
+				draw_bordered(parts[0], Rect2(anchor_origin, parts[0].get_size() * scale))
 				var rope := attachment - rope_start
+				var rotation := rope.angle() - PI * 0.5
 				var basis := Transform2D(visual_angle(y), Vector2(visual_x(y) - position.x, 0))
 				draw_set_transform(basis * rope_start, visual_angle(y) + rotation)
-				# Repeat the authored 128 px period without stretching the rope.
-				var rope_width := 4.5
-				var tile_height := 128.0 * rope_width / 48.0
-				var cursor := 0.0
-				while cursor < rope.length():
-					var height := minf(tile_height, rope.length() - cursor)
-					draw_texture_rect_region(parts[1], Rect2(-rope_width * 0.5, cursor, rope_width, height), Rect2(0, 0, 48, height * 48.0 / rope_width))
-					cursor += height
-				draw_set_transform(basis * attachment, visual_angle(y) + rotation)
-				draw_texture_rect(parts[2], Rect2(-Vector2(128, 29) * stone_scale, parts[2].get_size() * stone_scale), false)
+				var rope_bounds := visible_bounds(parts[1])
+				var rope_width := maxf(4.5, 3.0 * screen_pixel())
+				var rope_scale := Vector2(rope_width / maxf(rope_bounds.size.x, 1.0), rope.length() / maxf(rope_bounds.size.y, 1.0))
+				draw_bordered(parts[1], Rect2(-Vector2(rope_bounds.get_center().x, rope_bounds.position.y) * rope_scale, parts[1].get_size() * rope_scale))
+				draw_set_transform(Vector2(visual_x(y) - position.x, 0.0), visual_angle(y))
+				draw_bordered(parts[2], stone_rect)
 			_:
 				var size := sprite_size()
-				var rect := Rect2(-size * 0.5, size)
-				if kind == "WEB":
-					draw_texture_rect(texture, Rect2(rect.position + Vector2(0, 4), size), false, Color(0, 0, 0, 0.5))
-					for offset in [Vector2(-1.5, 0), Vector2(1.5, 0), Vector2(0, -1.5), Vector2(0, 1.5)]:
-						draw_texture_rect(texture, Rect2(rect.position + offset, size), false, OUTLINE)
-				elif kind in ["THORN", "ARCH", "WALL"]:
-					for layer in range(3, 0, -1):
-						_oval(Vector2(0, size.y * 0.3 + 3), Vector2(size.x * 0.46 + layer, 4 + layer), Color(0.03, 0.04, 0.02, 0.14))
-				draw_texture_rect(texture, rect, false)
+				var rect := Rect2(-visible_bounds(texture).get_center() * (size / texture.get_size()), size)
+				draw_bordered(texture, rect)
 		draw_set_transform(Vector2.ZERO)
 
 	func _draw() -> void:
@@ -289,7 +314,8 @@ class GapSky extends Node2D:
 			var y := lerpf(top, bottom, float(index) / 32.0)
 			var center := Vector2(hazard.visual_x(y) - hazard.position.x, y - hazard.position.y)
 			var normal := Vector2.RIGHT.rotated(hazard.visual_angle(y))
-			var half_width := hazard.lane_width(y) * 0.5 + 5.0
+			var painted_width := float(hazard.world_visual.call("_branch_painted_width", hazard.route, y)) if hazard.world_visual != null else ScaleLock.BRANCH_WIDTH
+			var half_width := painted_width * 0.5 + 5.0
 			left.append(center - normal * half_width)
 			right.append(center + normal * half_width)
 		right.reverse()
