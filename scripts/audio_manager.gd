@@ -126,7 +126,12 @@ func _track_beans(game: GameManager) -> void:
 
 func _update_danger(game: GameManager, delta: float) -> void:
 	var danger := game.gauge.normalized_danger
-	music.pitch_scale = lerpf(1.0, 1.15, clampf((danger - 0.45) / 0.55, 0.0, 1.0))
+	if music.stream == STREAMS.music_game:
+		var speed_pitch := 1.0 + 0.12 * clampf((game.player.speed_scale - 1.0) / 1.5, 0.0, 1.0)
+		var danger_pitch := lerpf(1.0, 1.15, clampf((danger - 0.45) / 0.55, 0.0, 1.0))
+		music.pitch_scale = minf(speed_pitch * danger_pitch, 1.25)
+	else:
+		music.pitch_scale = 1.0
 	wind.volume_db = VOLUME_DB.ambience + clampf(-game.player.global_position.y / 9000.0, 0.0, 5.0)
 	beat_cooldown -= delta
 	if danger > 0.56 and beat_cooldown <= 0.0:
@@ -155,6 +160,7 @@ func play_music(name: String) -> void:
 	if music.stream == STREAMS[name] and music.playing:
 		return
 	music.stream = STREAMS[name]
+	music.pitch_scale = 1.0
 	music.play()
 
 func play_sfx(name: String, pitch_scale: float = 1.0) -> void:

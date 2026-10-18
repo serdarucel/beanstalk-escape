@@ -8,6 +8,51 @@ const MODE_NORMAL := "NORMAL"
 const MODE_NIGHTMARE := "NIGHTMARE"
 const SPIDER_RED_ZONE_PX := 96.0
 
+class SpeedLines extends Node2D:
+	const LINE_COUNT := 24
+	var game: GameManager
+	var viewport_size := Vector2.ZERO
+	var travel := 0.0
+	var opacity := 0.0
+	var hud_exclusions: Array[Rect2] = []
+
+	func _process(delta: float) -> void:
+		viewport_size = get_viewport_rect().size
+		visible = game.app_state == AppState.PLAYING
+		if not visible:
+			return
+		opacity = clampf((game.player.speed_scale - 1.0) * 0.6, 0.0, 0.9)
+		travel = fposmod(travel + game.player.climb_speed() * delta, maxf(viewport_size.y + 120.0, 1.0))
+		hud_exclusions.clear()
+		for control in game.get_node("HUD").get_children():
+			if control is Control and control.is_visible_in_tree() and (control is Label or control is BaseButton or control is TextureRect):
+				hud_exclusions.append(control.get_global_rect().grow(6.0))
+		queue_redraw()
+
+	func _draw() -> void:
+		var edge_width := minf(100.0, viewport_size.x * 0.5 - 230.0)
+		if opacity <= 0.0 or edge_width <= 4.0:
+			return
+		var period := viewport_size.y + 120.0
+		for index in range(LINE_COUNT):
+			var lane := index / 2
+			var inset := 2.0 + fposmod(float(lane) * 31.0, edge_width - 4.0)
+			var x := inset if index % 2 == 0 else viewport_size.x - inset
+			var y := fposmod(float(index) * period / float(LINE_COUNT) + travel, period) - 120.0
+			var length := 30.0 + float(index % 5) * 16.0
+			var start := Vector2(x, maxf(y, 0.0))
+			var end := Vector2(x, minf(y + length, viewport_size.y))
+			if end.y <= start.y:
+				continue
+			var covered := false
+			var line_rect := Rect2(start - Vector2.ONE, Vector2(2.0, end.y - start.y + 2.0))
+			for exclusion in hud_exclusions:
+				if exclusion.intersects(line_rect):
+					covered = true
+					break
+			if not covered:
+				draw_line(start, end, Color(0.94, 0.97, 1.0, opacity), 1.0)
+
 class SpeakerButton extends Button:
 	var sound_enabled := true:
 		set(value):
@@ -181,7 +226,7 @@ var spider_red_zone_seen := false
 var completed_stages := {}
 var completion_committed := false
 const INTRO_BEAT_SECONDS := [2.3, 3.0, 2.3]
-const CAMERA_PLAYER_HEIGHT_RATIO := 0.62
+const CAMERA_PLAYER_HEIGHT_RATIO := 0.75
 var camera_play_position := Vector2.ZERO
 const INTRO_LOOK_UP_POSITION := Vector2(0.0, -210.0)
 const INTRO_GUARDIAN_SCALE := Vector2.ONE * 1.35
@@ -252,6 +297,14 @@ func _ready() -> void:
 	stages.stage_completed.connect(_on_stage_completed)
 	_ensure_actions()
 	_setup_hud()
+	var speed_layer := CanvasLayer.new()
+	speed_layer.name = "SpeedLayer"
+	speed_layer.layer = $HUD.layer - 1
+	add_child(speed_layer)
+	var speed_lines := SpeedLines.new()
+	speed_lines.name = "SpeedLines"
+	speed_lines.game = self
+	speed_layer.add_child(speed_lines)
 	pet_follower = PET_FOLLOWER.new()
 	pet_follower.name = "PetFollower"
 	add_child(pet_follower)

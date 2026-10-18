@@ -1,9 +1,9 @@
 class_name Balance
 extends RefCounted
 
-const PLAYER_VERTICAL_SPEED := 125.0
-## StageDatabase.WARNING_LEAD / PLAYER_VERTICAL_SPEED: preserve the 1x lead time.
-const DEAD_END_WARNING_SECONDS := 2.88
+const PLAYER_VERTICAL_SPEED := 160.0
+## StageDatabase.WARNING_LEAD / PLAYER_VERTICAL_SPEED = 360 px / 160 px/s.
+const DEAD_END_WARNING_SECONDS := 2.25
 const PLAYER_HORIZONTAL_SPEED := 680.0
 const PLAYER_HORIZONTAL_ACCELERATION := 6000.0
 const BRANCH_TRANSITION_SECONDS := 0.40
@@ -45,7 +45,9 @@ const STAGES_BEHIND := 2
 const STAGES_AHEAD := 3
 const STAGE_WINDOW_SIZE := STAGES_BEHIND + 1 + STAGES_AHEAD
 const ENDLESS_SPEED_RAMP_SECONDS := 180.0
-const ENDLESS_MAX_SPEED_SCALE := 2.0
+const ENDLESS_RAMP_END_SCALE := 2.0
+const ENDLESS_LATE_RAMP_PER_SECOND := 0.1 / 60.0
+const ENDLESS_MAX_SPEED_SCALE := 2.5
 const DIFFICULTY_STEP_SECONDS := 20.0
 const DIFFICULTY_MAX_TIER := 3
 ## Legacy fallback only; runtime geometry comes from each stage's length.
@@ -88,7 +90,9 @@ const GAUGE_THRESHOLDS := {
 const GAUGE_GAP_THRESHOLDS := {"GREEN": 240.0, "YELLOW": 180.0, "ORANGE": 96.0, "RED": 56.0, "DANGER": 28.0}
 
 static func speed_scale_for_time(t: float) -> float:
-	return 1.0 + (ENDLESS_MAX_SPEED_SCALE - 1.0) * clampf(t / ENDLESS_SPEED_RAMP_SECONDS, 0.0, 1.0)
+	if t <= ENDLESS_SPEED_RAMP_SECONDS:
+		return 1.0 + (ENDLESS_RAMP_END_SCALE - 1.0) * clampf(t / ENDLESS_SPEED_RAMP_SECONDS, 0.0, 1.0)
+	return minf(ENDLESS_RAMP_END_SCALE + (t - ENDLESS_SPEED_RAMP_SECONDS) * ENDLESS_LATE_RAMP_PER_SECOND, ENDLESS_MAX_SPEED_SCALE)
 
 static func difficulty_tier_for_time(t: float) -> int:
 	return mini(int(floor(t / DIFFICULTY_STEP_SECONDS)), DIFFICULTY_MAX_TIER)
@@ -98,9 +102,14 @@ static func tier_name(tier: int) -> String:
 
 static func estimated_time_for_height(h: float) -> float:
 	var distance := maxf(h, 0.0) / PLAYER_VERTICAL_SPEED
-	var ramp_distance := ENDLESS_SPEED_RAMP_SECONDS * (1.0 + ENDLESS_MAX_SPEED_SCALE) * 0.5
-	if distance >= ramp_distance:
-		return ENDLESS_SPEED_RAMP_SECONDS + (distance - ramp_distance) / ENDLESS_MAX_SPEED_SCALE
-	var acceleration := (ENDLESS_MAX_SPEED_SCALE - 1.0) / ENDLESS_SPEED_RAMP_SECONDS
-	# Rationalized quadratic root avoids cancellation near the start of a run.
-	return 2.0 * distance / (1.0 + sqrt(1.0 + 2.0 * acceleration * distance))
+	var ramp_distance := ENDLESS_SPEED_RAMP_SECONDS * (1.0 + ENDLESS_RAMP_END_SCALE) * 0.5
+	if distance <= ramp_distance:
+		var acceleration := (ENDLESS_RAMP_END_SCALE - 1.0) / ENDLESS_SPEED_RAMP_SECONDS
+		# Rationalized quadratic root avoids cancellation near the start of a run.
+		return 2.0 * distance / (1.0 + sqrt(1.0 + 2.0 * acceleration * distance))
+	var late_seconds := (ENDLESS_MAX_SPEED_SCALE - ENDLESS_RAMP_END_SCALE) / ENDLESS_LATE_RAMP_PER_SECOND
+	var late_distance := late_seconds * (ENDLESS_RAMP_END_SCALE + ENDLESS_MAX_SPEED_SCALE) * 0.5
+	var remaining := distance - ramp_distance
+	if remaining <= late_distance:
+		return ENDLESS_SPEED_RAMP_SECONDS + 2.0 * remaining / (ENDLESS_RAMP_END_SCALE + sqrt(ENDLESS_RAMP_END_SCALE * ENDLESS_RAMP_END_SCALE + 2.0 * ENDLESS_LATE_RAMP_PER_SECOND * remaining))
+	return ENDLESS_SPEED_RAMP_SECONDS + late_seconds + (remaining - late_distance) / ENDLESS_MAX_SPEED_SCALE
