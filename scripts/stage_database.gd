@@ -138,7 +138,15 @@ static func canonical_stages() -> Array:
 		stage["end_transition"] = "next_stage_immediate_with_three_async_pulses"
 		stage["nominal_duration_no_fire"] = float(stage.length) / Balance.PLAYER_VERTICAL_SPEED
 		stage["validation_status"] = "NOT_RUN"
-		stage["encounters"] = _paced_encounters(stage) if stage_number <= 5 else _densify_encounters(stage)
+		if stage_number == 1:
+			# A harmless center guide supplies the existing five-coin generator.
+			stage["encounters"] = [{"id": "S01-GOLD", "anchor": 464, "occupancy_height": 0, "recipe": {"kind": "GUIDE", "x": 0.5}, "witness": 1, "objective": "Climb the center coin line."}]
+		elif stage_number == 2:
+			stage["encounters"] = []
+		elif stage_number == 3:
+			stage["encounters"] = _opening_encounters(accumulated_height)
+		else:
+			stage["encounters"] = _paced_encounters(stage) if stage_number <= 5 else _densify_encounters(stage)
 		stage["witness"] = stage.encounters.map(func(encounter: Dictionary) -> Variant: return encounter.witness)
 		for encounter: Dictionary in stage.encounters:
 			var anchor := int(encounter.anchor)
@@ -148,6 +156,41 @@ static func canonical_stages() -> Array:
 		accumulated_height += int(stage.length)
 		stage["target_height"] = accumulated_height
 		result.append(stage)
+	return result
+
+## Invert the canonical B1 clock instead of assuming constant climbing speed.
+static func height_for_time(seconds: float) -> float:
+	var lower := 0.0
+	var upper := maxf(seconds, 0.0) * Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE + 1.0
+	for iteration in 48:
+		var middle := (lower + upper) * 0.5
+		if Balance.estimated_time_for_height(middle) < seconds:
+			lower = middle
+		else:
+			upper = middle
+	return (lower + upper) * 0.5
+
+static func _opening_encounters(start_height: int) -> Array:
+	var rows := [
+		[5.0, _hazard("BEAN", 1), 0, 220],
+		[8.5, _low("THORN", 1), 1, 90],
+		[12.5, _high("ARCH", 1), 1, 90],
+		[20.0, {"kind": "COMBO", "threats": [_hazard("S", 0), _low("THORN", 1)]}, 2, 90],
+		# WEB and the following bean are one deliberately close two-beat phrase.
+		[22.6, _high("WEB", 1), 0, 90],
+		[23.2, _hazard("BEAN", 2), 0, 90],
+		[26.5, {"kind": "COMBO", "threats": [{"kind": "FORK", "supports": [0, 1]}, _high("ARCH", 1)]}, 1, 90],
+	]
+	var result: Array = []
+	for row: Array in rows:
+		var recipe: Dictionary = row[1]
+		var solutions := encounter_solutions(recipe)
+		var chosen: Dictionary = solutions[0]
+		for solution: Dictionary in solutions:
+			if int(solution.route) == int(row[2]):
+				chosen = solution
+				break
+		result.append({"id": "S03-E%02d" % [result.size() + 1], "anchor": int(round(height_for_time(float(row[0])))) - start_height, "recipe": recipe, "witness": int(chosen.route), "occupancy_height": int(row[3]), "objective": "Read the opening runner rhythm."})
 	return result
 
 static func _stages_6_to_15() -> Array:
@@ -325,8 +368,9 @@ static func validate_sequence(stages: Array) -> Dictionary:
 	var violations := 0
 	var min_window := INF
 	var previous_end := 0.0
+	var previous_anchor := 0.0
+	var previous_recipe := {}
 	var frontier := {}
-	var speed := Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE
 	for stage_value: Dictionary in stages:
 		var start := float(stage_value.get("start_height", 0.0))
 		for encounter: Dictionary in stage_value.encounters:
@@ -344,7 +388,14 @@ static func validate_sequence(stages: Array) -> Dictionary:
 				var route := int(solution.route)
 				var best := INF if frontier.is_empty() else -INF
 				for previous_route in frontier:
-					var window := (start + float(encounter.anchor) - previous_end) / speed - _transfer_seconds(int(previous_route), route)
+					# The authored 0.6-second phrase is evaluated at its B1 speed,
+					# rather than at the speed cap reached minutes later.
+					var reaction_start := previous_end
+					# Staying on an already clear lane does not wait for a hazard
+					# on another lane to finish. Transfers still use full occupancy.
+					if int(previous_route) == route and not previous_recipe.is_empty() and route_survives(previous_recipe, route):
+						reaction_start = previous_anchor
+					var window := Balance.estimated_time_for_height(start + float(encounter.anchor)) - Balance.estimated_time_for_height(reaction_start) - _transfer_seconds(int(previous_route), route)
 					best = maxf(best, minf(float(frontier[previous_route]), window))
 				next_frontier[route] = best
 			if not frontier.is_empty():
@@ -359,6 +410,8 @@ static func validate_sequence(stages: Array) -> Dictionary:
 						next_frontier[route] = INF
 			frontier = next_frontier
 			previous_end = start + float(encounter.get("occupancy", [encounter.anchor, float(encounter.anchor) + OCCUPANCY_HEIGHT])[1])
+			previous_anchor = start + float(encounter.anchor)
+			previous_recipe = encounter.recipe
 	return {"encounters": encounters, "unsolvable": unsolvable, "min_window_seconds": min_window, "violations": violations}
 
 ## Called after anchor pacing and again after runtime dead-end insertion. The
@@ -367,7 +420,9 @@ static func _repair_reaction_windows(stage_value: Dictionary, previous := {}) ->
 	var start := float(stage_value.start_height)
 	var previous_route := int(previous.get("route", -1))
 	var previous_end := float(previous.get("end", 0.0))
-	var speed := Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE
+	var previous_anchor := float(previous.get("anchor", previous_end))
+	var previous_recipe: Dictionary = previous.get("recipe", {})
+	var previous_combo := bool(previous.get("combo", false))
 	for encounter: Dictionary in stage_value.encounters:
 		var solutions := encounter_solutions(encounter.recipe)
 		if solutions.is_empty() or _has_action_conflict(encounter.recipe):
@@ -379,13 +434,22 @@ static func _repair_reaction_windows(stage_value: Dictionary, previous := {}) ->
 				chosen = solution
 				break
 		var anchor := int(encounter.anchor)
+		if int(stage_value.number) >= 4 and previous_combo:
+			var end_time := Balance.estimated_time_for_height(previous_end)
+			var breath := maxf(2.0 * Balance.PLAYER_VERTICAL_SPEED * Balance.speed_scale_for_time(end_time), height_for_time(end_time + 2.0) - previous_end)
+			anchor = maxi(anchor, int(ceil(previous_end + breath - start)))
 		if previous_route >= 0:
-			var available := (start + float(anchor) - previous_end) / speed
+			var reaction_start := previous_end
+			if previous_route == int(chosen.route) and not previous_recipe.is_empty() and route_survives(previous_recipe, previous_route):
+				reaction_start = previous_anchor
+			var available := Balance.estimated_time_for_height(start + float(anchor)) - Balance.estimated_time_for_height(reaction_start)
 			if available - _transfer_seconds(previous_route, int(chosen.route)) < MIN_REACTION_SECONDS:
 				for solution: Dictionary in solutions:
 					if _transfer_seconds(previous_route, int(solution.route)) < _transfer_seconds(previous_route, int(chosen.route)):
 						chosen = solution
-			var required_anchor := previous_end - start + speed * (MIN_REACTION_SECONDS + _transfer_seconds(previous_route, int(chosen.route)))
+				if previous_route == int(chosen.route) and not previous_recipe.is_empty() and route_survives(previous_recipe, previous_route):
+					reaction_start = previous_anchor
+			var required_anchor := height_for_time(Balance.estimated_time_for_height(reaction_start) + MIN_REACTION_SECONDS + _transfer_seconds(previous_route, int(chosen.route))) - start
 			# One pixel above the boundary keeps subtraction rounding from making
 			# the measured window smaller than 0.45 seconds.
 			anchor = maxi(anchor, int(ceil(required_anchor)) + 1)
@@ -395,10 +459,13 @@ static func _repair_reaction_windows(stage_value: Dictionary, previous := {}) ->
 		encounter["witness"] = int(chosen.route)
 		previous_route = int(chosen.route)
 		previous_end = start + float(encounter.occupancy[1])
+		previous_anchor = start + float(anchor)
+		previous_recipe = encounter.recipe
+		previous_combo = String(encounter.recipe.kind) == "COMBO"
 	stage_value["witness"] = stage_value.encounters.map(func(encounter: Dictionary) -> Variant: return encounter.witness)
 	stage_value["length"] = maxi(int(stage_value.length), int(ceil(previous_end - start)))
 	stage_value["nominal_duration_no_fire"] = float(stage_value.length) / Balance.PLAYER_VERTICAL_SPEED
-	return {"route": previous_route, "end": previous_end}
+	return {"route": previous_route, "end": previous_end, "anchor": previous_anchor, "recipe": previous_recipe, "combo": previous_combo}
 
 static func _paced_encounters(stage: Dictionary) -> Array:
 	var source: Array = stage.encounters
@@ -513,7 +580,7 @@ static func _generate_through(stage_number: int, stream: Dictionary) -> void:
 		for index in stage.encounters.size():
 			stage.encounters[index]["id"] = "S%02d-E%02d" % [number, index + 1]
 		if number >= 4:
-			_add_endless_dead_end(stage, stream)
+			stage["encounters"] = _endless_encounters(stage, stream)
 		stream["last_solution"] = _repair_reaction_windows(stage, stream.get("last_solution", {}))
 		accumulated_height += int(stage.length)
 		stage["target_height"] = accumulated_height
@@ -532,6 +599,36 @@ static func _generate_through(stage_number: int, stream: Dictionary) -> void:
 		recent_templates.append(template_number)
 		if recent_templates.size() > 3:
 			recent_templates.pop_front()
+
+static func _endless_encounters(stage_value: Dictionary, stream: Dictionary) -> Array:
+	var rng: RandomNumberGenerator = stream.rng
+	var result: Array = []
+	var kinds := [["BEAN", "S", "R"], ["THORN", "K"], ["ARCH", "WEB", "M"]]
+	var classes := ["LANE", "LOW", "HIGH"]
+	var anchor := WARNING_LEAD
+	for index in int(stage_value.encounter_count):
+		var seconds := Balance.estimated_time_for_height(float(stage_value.start_height) + anchor)
+		var tier := Balance.difficulty_tier_for_time(seconds)
+		# Rotating class pairs also prevents a secondary class from appearing
+		# in three successive encounters, including across chunk boundaries.
+		var action_class := (int(stream.get("last_class", rng.randi_range(0, 2))) + 1) % 3
+		stream["last_class"] = action_class
+		var lane := rng.randi_range(0, 2)
+		var catalog: Array = kinds[action_class]
+		var threats := [_hazard(String(catalog[rng.randi_range(0, catalog.size() - 1)]), lane)]
+		if tier > 0:
+			var second_class := (action_class + 1) % 3
+			var second_catalog: Array = kinds[second_class]
+			threats.append(_hazard(String(second_catalog[rng.randi_range(0, second_catalog.size() - 1)]), (lane + 1) % 3))
+			if (action_class == 0 or second_class == 0) and seconds - float(stream.last_dead_end_time) >= ENDLESS_DEAD_END_INTERVAL_SECONDS:
+				threats.append({"kind": "FORK", "supports": [lane, (lane + 2) % 3]})
+				stream.last_dead_end_time = seconds
+		var recipe: Dictionary = threats[0] if threats.size() == 1 else {"kind": "COMBO", "threats": threats}
+		var solutions := encounter_solutions(recipe)
+		var chosen: Dictionary = solutions[rng.randi_range(0, solutions.size() - 1)]
+		result.append({"id": "S%02d-E%02d" % [int(stage_value.number), index + 1], "anchor": anchor, "occupancy_height": 90, "recipe": recipe, "witness": int(chosen.route), "action_class": classes[action_class], "objective": "Read the threat, then breathe."})
+		anchor += 90 + int(ceil(Balance.PLAYER_VERTICAL_SPEED * Balance.speed_scale_for_time(seconds) * (2.2 if tier > 0 else 1.2)))
+	return result
 
 static func _add_endless_dead_end(stage: Dictionary, stream: Dictionary) -> void:
 	for index in stage.encounters.size():

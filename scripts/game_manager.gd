@@ -254,8 +254,9 @@ var tutorial_step := 0
 var tutorial_force := false
 var tutorial_step_elapsed := 0.0
 var tutorial_transition_baseline := 0
-var tutorial_catch_triggered := false
-var tutorial_bean: BeanProjectile
+var tutorial_prompt_visible := false
+var tutorial_retry := false
+var tutorial_lane_done := false
 var result_badges: Array[Label] = []
 var ghost_sprite: Sprite2D
 var ghost_outline: Sprite2D
@@ -375,13 +376,13 @@ func _physics_process(delta: float) -> void:
 		result_elapsed += delta
 		if result_elapsed >= 1.0:
 			_show_leaderboard()
-	if app_state == AppState.PLAYING and not tutorial_active:
+	if app_state == AppState.PLAYING:
 		score += maxf(score_previous_y - player.global_position.y, 0.0) * 0.1 * clampi(golds.combo, 1, 5)
 		economy.add_climb(maxf(climb_previous_y - player.global_position.y, 0.0))
 	climb_previous_y = player.global_position.y
 	economy.update_climb_save(delta)
 	score_previous_y = player.global_position.y
-	player.speed_scale = 1.0 if tutorial_active else Balance.speed_scale_for_time(total_time)
+	player.speed_scale = Balance.speed_scale_for_time(total_time)
 	_update_hit_invulnerability(delta)
 	_update_danger(delta)
 	reward_toast_remaining = maxf(reward_toast_remaining - delta, 0.0)
@@ -410,9 +411,8 @@ func _physics_process(delta: float) -> void:
 		_update_hud()
 		_publish_readonly_web_state()
 		return
-	if not tutorial_active:
-		total_time += delta
-		player.speed_scale = Balance.speed_scale_for_time(total_time)
+	total_time += delta
+	player.speed_scale = Balance.speed_scale_for_time(total_time)
 	if tutorial_active:
 		_update_onboarding(delta)
 	else:
@@ -432,9 +432,8 @@ func _physics_process(delta: float) -> void:
 	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
 	if gauge.distance_px < SPIDER_RED_ZONE_PX:
 		spider_red_zone_seen = true
-	if not tutorial_active:
-		stages.update_progress(player.global_position.y)
-		_remember_continue_checkpoint()
+	stages.update_progress(player.global_position.y)
+	_remember_continue_checkpoint()
 	best_spider_distance = maxf(best_spider_distance, gauge.distance_px)
 	if gauge.level == "DANGER" and not danger_was_active:
 		danger_was_active = true
@@ -608,6 +607,9 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 		dispatch_command("jump" if displacement.y < 0.0 else "hug", "mobile")
 
 func restart() -> void:
+	tutorial_active = false
+	tutorial_prompt_visible = false
+	tutorial_step = 0
 	paused_by_platform = false
 	resume_countdown_remaining = 0.0
 	economy.begin_run()
@@ -1042,6 +1044,9 @@ func dispatch_command(command: String, source := "runtime") -> bool:
 func _die(cause: DeathCause = DeathCause.CAUGHT) -> void:
 	if app_state == AppState.PLAYER_DEAD:
 		return
+	if tutorial_active:
+		_retry_onboarding()
+		return
 	if not tutorial_active:
 		if hit_invulnerability_remaining > 0.0:
 			_respawn_at_continue_checkpoint()
@@ -1256,7 +1261,7 @@ func _request_confirm() -> void:
 			_complete_new_run()
 
 func _spider_can_catch() -> bool:
-	if tutorial_active and tutorial_step < 3:
+	if tutorial_active:
 		return false
 	var claw_half_width := ScaleLock.BRANCH_CENTER_GAP + ScaleLock.BRANCH_WIDTH * 0.5
 	return gauge.distance_px <= Balance.CATCH_DISTANCE and absf(player.global_position.x - spider.global_position.x) <= claw_half_width
@@ -1321,14 +1326,9 @@ func _show_credits() -> void:
 	($HUD/InfoBack as Button).grab_focus()
 
 func _replay_tutorial() -> void:
-	if resume_available:
-		menu_help_open = true
-		_show_credits()
-		return
 	mode = MODE_NORMAL
 	tutorial_force = true
-	restart()
-	_start_onboarding()
+	start_game()
 
 func _toggle_sound_setting() -> void:
 	meta_settings.sound = not bool(meta_settings.sound)
@@ -1507,87 +1507,96 @@ func _start_onboarding() -> void:
 	tutorial_active = true
 	tutorial_step = 1
 	tutorial_step_elapsed = 0.0
-	tutorial_catch_triggered = false
-	tutorial_bean = null
-	_enter_tutorial_arena()
-	ghost_sprite.visible = false
-	_show_onboarding_step()
-
-func _enter_tutorial_arena() -> void:
-	player.speed_scale = 1.0
-	danger_remaining = 0.0
-	danger_vignette_alpha = 0.0
-	for child in get_tree().get_nodes_in_group("run_transient"):
-		child.free()
-	beans.reset_run()
-	beans.sandbox_mode = true
-	stages.reset_run()
-	var stage_number := 3
-	var practice_progress := 0.18
-	for sample_index in range(18, 72):
-		var candidate := float(sample_index) / 100.0
-		if stages.has_route_support_at(stage_number, 0, candidate) and stages.has_route_support_at(stage_number, 1, candidate) and stages.has_route_support_at(stage_number, 2, candidate) and stages.transfer_window_open(stage_number, candidate):
-			practice_progress = candidate
-			break
-	var practice_y := -(stages.stage_start_height(stage_number) + stages.stage_length(stage_number) * practice_progress)
-	player.reset_run(Vector2(stages.branch_x_at(1, practice_y), practice_y))
-	action_hazards.reset_run()
-	climb_previous_y = player.global_position.y
-	spider.reset_run(player.global_position + Vector2(0.0, 900.0))
-	player.set_physics_process(true)
-	spider.set_physics_process(false)
-	beans.set_physics_process(true)
-	rocks.set_physics_process(false)
-	storm.set_physics_process(false)
-	var spider_body := spider.get_node_or_null("Body") as CanvasItem
-	if spider_body != null:
-		spider_body.visible = false
-	golds.visible = false
-	gauge.update_from_positions(player.global_position.y, spider.global_position.y)
+	tutorial_prompt_visible = false
+	tutorial_retry = false
+	tutorial_lane_done = false
 	tutorial_transition_baseline = player.branch_transition_count
+	$HUD/TutorialPanel.text = ""
+	_end_danger(true)
+	spider.boost_remaining = 0.0
+	spider.global_position.y = player.global_position.y + spider.far_gap()
+	spider.retreat_from_danger(spider.far_gap())
+	ghost_sprite.visible = false
 
 func _update_onboarding(delta: float) -> void:
 	tutorial_step_elapsed += delta
-	if tutorial_step == 2 and tutorial_bean == null and tutorial_step_elapsed >= 0.35:
-		_spawn_tutorial_bean()
-		_show_onboarding_step()
-	if tutorial_step == 1 and player.branch_transition_count > tutorial_transition_baseline:
-		tutorial_step = 2
-		tutorial_step_elapsed = 0.0
-		tutorial_transition_baseline = player.branch_transition_count
-		_spawn_tutorial_bean()
-		_show_onboarding_step()
-	elif tutorial_step == 2 and player.branch_transition_count > tutorial_transition_baseline:
-		if tutorial_bean != null and is_instance_valid(tutorial_bean):
-			tutorial_bean.consume()
-		tutorial_bean = null
-		tutorial_step = 3
-		tutorial_step_elapsed = 0.0
-		_show_onboarding_step()
-	elif tutorial_step == 3 and tutorial_step_elapsed >= 0.8 and not tutorial_catch_triggered:
-		tutorial_catch_triggered = true
-		var spider_body := spider.get_node_or_null("Body") as CanvasItem
-		if spider_body != null:
-			spider_body.visible = true
-		spider.global_position = player.global_position + Vector2(0.0, Balance.CATCH_DISTANCE * 0.5)
-		_die(DeathCause.CAUGHT)
-		$HUD/TutorialPanel.text = "3 / 3  CAUGHT\nThe death screen offers retry, restart, and menu. This practice catch does not affect your run."
-		$HUD/TutorialSkip.text = "START CLIMB"
-
-func _spawn_tutorial_bean() -> void:
-	if not tutorial_active or tutorial_step != 2:
+	var opening: Dictionary = stages.stage_records[3]
+	var encounter: Dictionary = opening.encounters[tutorial_step - 1]
+	var target_y := -(float(opening.start_height) + float(encounter.anchor))
+	var ahead := player.global_position.y - target_y
+	if ahead > player.climb_speed() * 1.2:
 		return
-	var route := player.transition_to if player.transition_state_name() == "TRANSITION" else player.active_branch
-	tutorial_bean = beans.spawn_bean(route, player.global_position.y, "tutorial-dodge-%d" % Time.get_ticks_msec())
-	tutorial_bean.request_release()
+	if not tutorial_prompt_visible and not (tutorial_step == 1 and tutorial_lane_done):
+		tutorial_prompt_visible = true
+		_show_onboarding_step()
+	if tutorial_step == 1:
+		if player.branch_transition_count > tutorial_transition_baseline:
+			tutorial_lane_done = true
+			tutorial_prompt_visible = false
+		# Let the real falling bean resolve before arming the jump lesson.
+		if ahead < -220.0:
+			if not tutorial_lane_done or player.occupies_route(1):
+				_retry_onboarding()
+			else:
+				_advance_onboarding()
+		return
+	# ActionHazardManager deliberately yields tutorial collisions to this owner.
+	# Use the same contact band and real player action as its normal collision.
+	if ahead > 18.0:
+		return
+	var correct := player.is_airborne() if tutorial_step == 2 else player.is_hugging()
+	if not correct or player.active_branch != 1 or player.movement_mode == PlayerController.MovementMode.TRANSITION:
+		_retry_onboarding()
+		return
+	for hazard in action_hazards.hazards:
+		if is_instance_valid(hazard) and hazard.hazard_id.begins_with(String(encounter.id) + "-"):
+			action_hazards.cleared_ids[hazard.hazard_id] = true
+			action_hazards.cleared_count += 1
+	action_hazards.previous_player_y = player.global_position.y
+	_advance_onboarding()
+
+func _advance_onboarding() -> void:
+	tutorial_prompt_visible = false
+	tutorial_retry = false
+	tutorial_step_elapsed = 0.0
+	$HUD/TutorialPanel.text = ""
+	if tutorial_step == 3:
+		_finish_onboarding()
+	else:
+		tutorial_step += 1
+
+func _retry_onboarding() -> void:
+	if not tutorial_active or tutorial_step_elapsed < 0.1:
+		return
+	var rewind := 2.0 * player.climb_speed()
+	var next_position := player.global_position + Vector2(0.0, rewind)
+	var transitions := player.branch_transition_count
+	player.reset_run(next_position)
+	player.branch_transition_count = transitions
+	player.speed_scale = Balance.speed_scale_for_time(total_time)
+	tutorial_transition_baseline = transitions
+	tutorial_step_elapsed = 0.0
+	tutorial_lane_done = false
+	tutorial_retry = true
+	tutorial_prompt_visible = true
+	# Re-arm campaign beans after the spawner finishes its current contact loop.
+	beans.call_deferred("reset_run")
+	action_hazards.sync_after_player_teleport()
+	spider.global_position.y += rewind
+	spider.boost_remaining = 0.0
+	spider.retreat_from_danger(spider.far_gap())
+	score_previous_y = player.global_position.y
+	climb_previous_y = player.global_position.y
+	_show_onboarding_step()
 
 func _show_onboarding_step() -> void:
+	var touch := DisplayServer.is_touchscreen_available()
 	var messages := {
-		1: "1 / 3  CHANGE BRANCH\n" + ("Swipe left or right to change branch." if DisplayServer.is_touchscreen_available() else "Press LEFT or RIGHT once. One press commits one branch change."),
-		2: "2 / 3  DODGE THE BEAN\nA bean is falling on your route. Change branch once to escape.",
-		3: "3 / 3  SPIDER CATCH\nThe spider is closing in. Watch the controlled catch.",
+		1: "SWIPE ←/→" if touch else "PRESS ← / →",
+		2: "SWIPE UP TO JUMP" if touch else "PRESS W / ↑",
+		3: "SWIPE DOWN TO HUG" if touch else "PRESS S / ↓",
 	}
-	$HUD/TutorialPanel.text = messages.get(tutorial_step, "")
+	$HUD/TutorialPanel.text = "%d / 3  %s%s" % [tutorial_step, "TRY AGAIN\n" if tutorial_retry else "", messages.get(tutorial_step, "")]
 	$HUD/TutorialSkip.text = "SKIP"
 	_update_hud()
 
@@ -1597,9 +1606,10 @@ func _finish_onboarding() -> void:
 	tutorial_active = false
 	tutorial_force = false
 	tutorial_step = 0
-	tutorial_bean = null
+	tutorial_prompt_visible = false
+	action_hazards.previous_player_y = player.global_position.y
 	save_manager.mark_tutorial_completed()
-	restart()
+	_update_hud()
 
 func _reset_stage_ghost(stage_number: int) -> void:
 	ghost_stage = stage_number
@@ -1716,11 +1726,8 @@ func _update_encounter_hints() -> void:
 			_queue_hint("rock", "AVOID THE ROCKS")
 
 func on_bean_hit() -> void:
-	if tutorial_active and tutorial_step == 2:
-		tutorial_step_elapsed = 0.0
-		tutorial_transition_baseline = player.branch_transition_count
-		tutorial_bean = null
-		$HUD/TutorialPanel.text = "2 / 3  TRY AGAIN\nThe bean hit this branch. Wait for the warning, then change branch once."
+	if tutorial_active:
+		_retry_onboarding()
 		return
 	_on_danger_obstacle_hit()
 
@@ -1728,6 +1735,9 @@ func on_rock_hit() -> void:
 	_on_danger_obstacle_hit()
 
 func _on_danger_obstacle_hit() -> void:
+	if tutorial_active:
+		_retry_onboarding()
+		return
 	if tutorial_active or app_state != AppState.PLAYING or hit_invulnerability_remaining > 0.0 or current_lives <= 0:
 		return
 	if danger_remaining > 0.0:
@@ -2625,7 +2635,7 @@ func _update_hud() -> void:
 	_update_encounter_hints()
 	_pump_text_messages()
 	var playing := app_state == AppState.PLAYING
-	var normal_playing := playing and not tutorial_active
+	var normal_playing := playing
 	danger_vignette.visible = normal_playing and danger_vignette_alpha > 0.0 and spider.distance_to_player() <= DANGER_FRAME_MAX_GAP
 	danger_vignette.modulate.a = danger_vignette_alpha
 	var result_visible := app_state == AppState.GAME_COMPLETE
@@ -2664,8 +2674,8 @@ func _update_hud() -> void:
 		$HUD/InfoTitle.text = "HOW TO PLAY"
 		$HUD/InfoBody.text = "A / D or LEFT / RIGHT: switch branches\nTouch the left / right side to move\n\nClimb as high as you can. The vine gets faster.\nAvoid falling beans, rocks and broken branches.\nCollect gold along the way.\n\nF / TIME: Time Wings (unlocks during the climb)\nH / FIRE: Fire Wings (unlocks during the climb)\n\nESC: pause / resume"
 	$HUD/InfoBack.visible = credits_visible
-	$HUD/TutorialPanel.visible = tutorial_active
-	$HUD/TutorialSkip.visible = tutorial_active
+	$HUD/TutorialPanel.visible = playing and tutorial_active and tutorial_prompt_visible
+	$HUD/TutorialSkip.visible = playing and tutorial_active
 	$HUD/Mute.visible = playing
 	$HUD/IntroText.visible = app_state in [AppState.INTRO, AppState.FINAL_CINEMATIC]
 	$HUD/Gauge.visible = normal_playing

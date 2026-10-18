@@ -1,8 +1,8 @@
 {
   "stages": [
-    {"stage": 1, "length_px": 1600, "encounter_count": 5, "min_encounter_spacing_px": 220},
-    {"stage": 2, "length_px": 1620, "encounter_count": 5, "min_encounter_spacing_px": 220},
-    {"stage": 3, "length_px": 1640, "encounter_count": 5, "min_encounter_spacing_px": 220},
+    {"stage": 1, "length_px": 480, "encounter_count": 1, "min_encounter_spacing_px": 0},
+    {"stage": 2, "length_px": 1, "encounter_count": 0, "min_encounter_spacing_px": 0},
+    {"stage": 3, "length_px": 4720, "encounter_count": 7, "min_encounter_spacing_px": 0},
     {"stage": 4, "length_px": 1660, "encounter_count": 5, "min_encounter_spacing_px": 220},
     {"stage": 5, "length_px": 1680, "encounter_count": 5, "min_encounter_spacing_px": 220},
     {"stage": 6, "length_px": 1700, "encounter_count": 6, "min_encounter_spacing_px": 220},
