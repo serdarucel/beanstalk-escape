@@ -827,9 +827,6 @@ func _on_stage_completed(stage_number: int) -> void:
 		for old in history.keys():
 			if int(old) < stage_number - Balance.STAGES_BEHIND:
 				history.erase(old)
-	var player_body := player.get_node_or_null("Body")
-	if player_body != null and player_body.has_method("play_celebration"):
-		player_body.play_celebration()
 	var reward := economy.complete_stage(stage_number)
 	if stage_number <= 30:
 		economy.mark_stage_completed(stage_number)
@@ -1076,7 +1073,7 @@ func _continue_route_has_clearance(world_y: float, route: int, clearance: float)
 func _update_hit_invulnerability(delta: float) -> void:
 	if app_state == AppState.PLAYING and hit_invulnerability_remaining > 0.0:
 		hit_invulnerability_remaining = maxf(hit_invulnerability_remaining - delta, 0.0)
-		player.modulate.a = 0.30 if int(hit_invulnerability_remaining * 12.0) % 2 == 0 else 1.0
+		player.modulate.a = 0.60 if int(hit_invulnerability_remaining * 8.0) % 2 == 0 else 1.0
 	else:
 		player.modulate.a = 1.0
 

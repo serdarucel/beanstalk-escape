@@ -42,6 +42,7 @@ var mode := "hang"
 var frame_name := "hang"
 var climb_time := 0.0
 var hurt_remaining := 0.0
+var hurt_flash_remaining := 0.0
 var celebrate_remaining := 0.0
 var death_offset := 0.0
 var last_penalty := 0
@@ -86,7 +87,9 @@ func _process(delta: float) -> void:
 	if penalty_count != last_penalty:
 		last_penalty = penalty_count
 		hurt_remaining = 0.32
+		hurt_flash_remaining = 0.12
 	hurt_remaining = maxf(hurt_remaining - delta, 0.0)
+	hurt_flash_remaining = maxf(hurt_flash_remaining - delta, 0.0)
 	celebrate_remaining = maxf(celebrate_remaining - delta, 0.0)
 	if player.time_wings_active and not _time_wings_was_active:
 		_time_wings_reveal = 0.0
@@ -112,7 +115,7 @@ func _process(delta: float) -> void:
 			fire_trails[index].scale = fire_wings.scale / FIRE_TRAIL_REFERENCE_SCALE
 			fire_trails[index].modulate.a = 0.55 + 0.18 * sin(Time.get_ticks_msec() * 0.018 + float(index) * PI)
 	_update_mode(player, delta)
-	flash_material.set_shader_parameter("flash_amount", 0.78 if hurt_remaining > 0.18 else 0.0)
+	flash_material.set_shader_parameter("flash_amount", 0.45 if hurt_flash_remaining > 0.0 else 0.0)
 	_update_cosmetic_anchors()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -145,7 +148,7 @@ func _update_mode(player: PlayerController, delta: float) -> void:
 			takeoff_particles.emitting = true
 		_was_transferring = true
 		_set_mode("jump", "jump")
-	elif app_state == GameManager.AppState.GAME_COMPLETE or celebrate_remaining > 0.0:
+	elif app_state == GameManager.AppState.GAME_COMPLETE or (app_state != GameManager.AppState.PLAYING and celebrate_remaining > 0.0):
 		_set_mode("celebrate", "cheer")
 	elif hurt_remaining > 0.0:
 		_set_mode("hurt", "hurt")
@@ -460,6 +463,7 @@ func _build_visual() -> void:
 	shader.code = """
 shader_type canvas_item;
 uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 flash_color : source_color = vec4(1.0, 0.35, 0.30, 1.0);
 uniform vec4 outline_color : source_color = vec4(0.035, 0.043, 0.071, 1.0);
 uniform float outline_source_px = 4.1;
 uniform vec2 shadow_source_offset = vec2(0.0, 7.0);
@@ -487,11 +491,12 @@ void fragment() {
 	float border_alpha = max(outline_alpha - pixel.a, 0.0);
 	float backdrop_alpha = max(border_alpha, shadow_alpha * (1.0 - outline_alpha));
 	vec3 backdrop_color = mix(vec3(0.02, 0.025, 0.035), outline_color.rgb, step(shadow_alpha, border_alpha));
-	vec3 flashed_rgb = mix(pixel.rgb, vec3(1.0), flash_amount);
+	vec3 flashed_rgb = mix(pixel.rgb, flash_color.rgb, flash_amount);
 	COLOR = vec4(mix(backdrop_color, flashed_rgb, pixel.a), max(pixel.a, backdrop_alpha));
 }
 """
 	flash_material.shader = shader
+	flash_material.set_shader_parameter("flash_color", Color(1.0, 0.35, 0.30))
 	sprite.material = flash_material
 	add_child(sprite)
 	outfit_back_sprite = Sprite2D.new()
