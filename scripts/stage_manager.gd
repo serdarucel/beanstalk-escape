@@ -115,11 +115,13 @@ func clear_runtime_hazards() -> void:
 	runtime_breaks.clear()
 	runtime_webs.clear()
 
-func set_runtime_break(stage_number: int, route: int, start_height: float, end_height: float, enabled: bool) -> void:
-	_set_runtime_hazard(runtime_breaks, stage_number, route, start_height, end_height, enabled)
+func set_runtime_break(_stage_number: int, _route: int, _start_height: float, _end_height: float, _enabled: bool) -> void:
+	# Breaking branches are disabled in the endless runner.
+	pass
 
-func set_runtime_web(stage_number: int, route: int, start_height: float, end_height: float, enabled: bool) -> void:
-	_set_runtime_hazard(runtime_webs, stage_number, route, start_height, end_height, enabled)
+func set_runtime_web(_stage_number: int, _route: int, _start_height: float, _end_height: float, _enabled: bool) -> void:
+	# Web traps are disabled in the endless runner.
+	pass
 
 func _set_runtime_hazard(target: Array, stage_number: int, route: int, start_height: float, end_height: float, enabled: bool) -> void:
 	for index in range(target.size() - 1, -1, -1):
@@ -186,27 +188,13 @@ func _patterns_for_records(source_stages: Array) -> Array:
 					var safe_routes := supported.duplicate()
 					safe_routes.erase(blocked)
 					bean_slots.append({"id": "%s-B%d" % [encounter.id, blocked], "anchor": encounter.anchor, "warning_height": encounter.warning_height, "occupancy": encounter.occupancy, "progress": slot_progress, "blocked_route": blocked, "safe_routes": safe_routes, "safety_route": int(encounter.witness), "warning_seconds": Balance.BEAN_WARNING_SECONDS, "count": int(threat.get("count", 1))})
-				elif threat_kind in ["S", "R", "F", "WALL", "M"]:
+				elif threat_kind in ["S", "R", "WALL"]:
 					var routes: Array = threat.get("lanes", [int(threat.get("lane", 1))])
 					var supported := _routes_supported_over(stage, routes, float(encounter.anchor), float(encounter.anchor) + 180.0)
-					# Moving stones require both endpoints; never alter their motion.
-					if supported.is_empty() or (threat_kind == "M" and supported.size() != routes.size()):
+					if supported.is_empty():
 						continue
 					routes = supported
 					rock_slots.append({"id": "%s-%s-%d" % [encounter.id, threat_kind, rock_slots.size()], "kind": threat_kind, "routes": routes.duplicate(), "anchor": float(encounter.anchor), "warning_height": float(encounter.warning_height), "witness": int(encounter.witness)})
-				elif threat_kind in ["V", "K", "WEB"]:
-					if threat_kind != "V" and _routes_supported_over(stage, [int(threat.lane)], float(encounter.anchor), float(encounter.occupancy[1])).is_empty():
-						continue
-					storm_slots.append({
-						"id": "%s-%s-%d" % [encounter.id, threat_kind, storm_slots.size()],
-						"kind": threat_kind,
-						"lane": int(threat.get("lane", int(encounter.witness))),
-						"direction": float(threat.get("direction", 0.0)),
-						"gain": float(threat.get("gain", 1.0)),
-						"anchor": float(encounter.anchor),
-						"warning_height": float(encounter.warning_height),
-						"occupancy": encounter.occupancy.duplicate(),
-					})
 		result.append({"stage": stage_number, "length": stage.length, "start_height": stage.start_height, "entry": 1, "open_routes": open_routes, "route_end_progress": route_end_progress, "trunk_features": trunk_features, "support_windows": support_windows, "bean_slots": bean_slots, "rock_slots": rock_slots, "storm_slots": storm_slots, "encounters": stage.encounters, "variant": run_variant})
 	return result
 
