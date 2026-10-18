@@ -1579,7 +1579,8 @@ func _start_onboarding() -> void:
 	tutorial_retry = false
 	tutorial_lane_done = false
 	tutorial_transition_baseline = player.branch_transition_count
-	$HUD/TutorialPanel.text = ""
+	tutorial_prompt_visible = true
+	_show_onboarding_step()
 	_end_danger(true)
 	spider.boost_remaining = 0.0
 	spider.global_position.y = player.global_position.y + spider.far_gap()
@@ -1588,19 +1589,19 @@ func _start_onboarding() -> void:
 
 func _update_onboarding(delta: float) -> void:
 	tutorial_step_elapsed += delta
+	$HUD/TutorialArrow.queue_redraw()
 	var opening: Dictionary = stages.stage_records[3]
 	var encounter: Dictionary = opening.encounters[tutorial_step - 1]
 	var target_y := -(float(opening.start_height) + float(encounter.anchor))
 	var ahead := player.global_position.y - target_y
 	if ahead > player.climb_speed() * 1.2:
 		return
-	if not tutorial_prompt_visible and not (tutorial_step == 1 and tutorial_lane_done):
+	if not tutorial_prompt_visible:
 		tutorial_prompt_visible = true
 		_show_onboarding_step()
 	if tutorial_step == 1:
 		if player.branch_transition_count > tutorial_transition_baseline:
 			tutorial_lane_done = true
-			tutorial_prompt_visible = false
 		# Let the real falling bean resolve before arming the jump lesson.
 		if ahead < -220.0:
 			if not tutorial_lane_done or player.occupies_route(1):
@@ -1632,6 +1633,8 @@ func _advance_onboarding() -> void:
 		_finish_onboarding()
 	else:
 		tutorial_step += 1
+		tutorial_prompt_visible = true
+		_show_onboarding_step()
 
 func _retry_onboarding() -> void:
 	if not tutorial_active or tutorial_step_elapsed < 0.1:
@@ -1661,13 +1664,41 @@ func _retry_onboarding() -> void:
 func _show_onboarding_step() -> void:
 	var touch := DisplayServer.is_touchscreen_available()
 	var messages := {
-		1: "SWIPE ←/→" if touch else "PRESS ← / →",
-		2: "SWIPE UP TO JUMP" if touch else "PRESS W / ↑",
-		3: "SWIPE DOWN TO HUG" if touch else "PRESS S / ↓",
+		1: "SWIPE LEFT OR RIGHT" if touch else "PRESS ← / →",
+		2: "SWIPE UP TO JUMP" if touch else "PRESS W / ↑ TO JUMP",
+		3: "SWIPE DOWN TO HUG" if touch else "PRESS S / ↓ TO HUG",
 	}
 	$HUD/TutorialPanel.text = "%d / 3  %s%s" % [tutorial_step, "TRY AGAIN\n" if tutorial_retry else "", messages.get(tutorial_step, "")]
 	$HUD/TutorialSkip.text = "SKIP"
 	_update_hud()
+	layout_hud_for_viewport(get_viewport_rect().size)
+	$HUD/TutorialArrow.queue_redraw()
+
+class TutorialSkipButton extends Button:
+	func _has_point(point: Vector2) -> bool:
+		# A 32px visible button retains a 44px touch target.
+		return Rect2(Vector2(0.0, -6.0), size + Vector2(0.0, 12.0)).has_point(point)
+
+func _draw_onboarding_arrow() -> void:
+	var arrow := $HUD/TutorialArrow as Control
+	var center := arrow.size * 0.5
+	var direction := Vector2.RIGHT if tutorial_step == 1 else (Vector2.UP if tutorial_step == 2 else Vector2.DOWN)
+	var length := arrow.size.y - 20.0
+	var pulse := sin(tutorial_step_elapsed * 4.0) * 4.0
+	var start := center - direction * (length * 0.5) + direction * pulse
+	var end := start + direction * length
+	var side := direction.orthogonal()
+	var color := Color("a9fff1")
+	arrow.draw_line(start, end, color, 5.0, true)
+	arrow.draw_polyline(PackedVector2Array([end - direction * 14.0 + side * 12.0, end, end - direction * 14.0 - side * 12.0]), color, 5.0, true)
+	if tutorial_step == 1:
+		arrow.draw_polyline(PackedVector2Array([start + direction * 14.0 + side * 12.0, start, start + direction * 14.0 - side * 12.0]), color, 5.0, true)
+	if DisplayServer.is_touchscreen_available():
+		# Draw a fingertip and palm, avoiding platform-dependent emoji glyphs.
+		var finger := start.lerp(end, fmod(tutorial_step_elapsed, 1.2) / 1.2)
+		arrow.draw_circle(finger, 7.0, Color("ffdcaf"))
+		arrow.draw_line(finger, finger + Vector2(0, 17), Color("ffdcaf"), 9.0, true)
+		arrow.draw_circle(finger + Vector2(5, 22), 11.0, Color("ffdcaf"))
 
 func _finish_onboarding() -> void:
 	if not tutorial_active:
@@ -2001,7 +2032,25 @@ func _setup_hud() -> void:
 	tutorial_box.content_margin_left = 18.0
 	tutorial_box.content_margin_right = 18.0
 	tutorial_panel.add_theme_stylebox_override("normal", tutorial_box)
-	_add_action_button("TutorialSkip", "SKIP", _finish_onboarding)
+	var tutorial_arrow := Control.new()
+	tutorial_arrow.name = "TutorialArrow"
+	tutorial_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$HUD.add_child(tutorial_arrow)
+	tutorial_arrow.draw.connect(_draw_onboarding_arrow)
+	var tutorial_skip := TutorialSkipButton.new()
+	tutorial_skip.name = "TutorialSkip"
+	tutorial_skip.text = "SKIP"
+	tutorial_skip.theme = ui_theme
+	tutorial_skip.pressed.connect(_finish_onboarding)
+	$HUD.add_child(tutorial_skip)
+	tutorial_skip.custom_minimum_size = Vector2.ZERO
+	tutorial_skip.add_theme_font_size_override("font_size", 14)
+	var skip_style := StyleBoxFlat.new()
+	skip_style.bg_color = Color(0.03, 0.06, 0.08, 0.45)
+	skip_style.set_content_margin_all(0.0)
+	for state in ["normal", "hover", "pressed", "focus"]:
+		tutorial_skip.add_theme_stylebox_override(state, skip_style)
+	tutorial_skip.add_theme_color_override("font_color", Color("b3c9c5"))
 	var intro_label := $HUD/IntroText as Label
 	intro_label.theme = ui_theme
 	intro_label.add_theme_font_size_override("font_size", 34)
@@ -2345,11 +2394,27 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	_layout_centered_label($HUD/InfoBody, width, 92.0, maxf(height - 190.0, 130.0), 64.0)
 	$HUD/InfoBack.position = Vector2((width - 220.0) * 0.5, height - 76.0)
 	$HUD/InfoBack.size = Vector2(220.0, 52.0)
-	var tutorial_width := minf(640.0, width - 48.0)
-	$HUD/TutorialPanel.position = Vector2((width - tutorial_width) * 0.5, 12.0)
-	$HUD/TutorialPanel.size = Vector2(tutorial_width, 88.0)
-	$HUD/TutorialSkip.position = Vector2((width - 190.0) * 0.5, 120.0)
-	$HUD/TutorialSkip.size = Vector2(190.0, 40.0)
+	var tutorial_width := width * 0.86 if portrait else minf(640.0, width * 0.86)
+	var tutorial_scale := float(get_tree().root.size.x) / maxf(width, 1.0)
+	var tutorial_font := maxi(24, ceili(36.0 / maxf(tutorial_scale, 0.001)))
+	var tutorial_panel := $HUD/TutorialPanel as Label
+	tutorial_panel.add_theme_font_size_override("font_size", tutorial_font)
+	tutorial_panel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var text_width := tutorial_width - 36.0
+	var lines := 0
+	for line in tutorial_panel.text.split("\n"):
+		lines += maxi(1, ceili(tutorial_panel.get_theme_font("font").get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x / text_width))
+	var text_height := tutorial_panel.get_theme_font("font").get_height(tutorial_font)
+	tutorial_panel.position = Vector2((width - tutorial_width) * 0.5, 112.0)
+	tutorial_panel.size = Vector2(tutorial_width, text_height * lines + 12.0)
+	$HUD/TutorialArrow.position = Vector2(width * 0.5 - 64.0, tutorial_panel.position.y + tutorial_panel.size.y)
+	$HUD/TutorialArrow.size = Vector2(128.0, text_height * 2.0 + 20.0)
+	var skip_bottom := 8.0
+	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
+		var counter := $HUD.get_node(key) as Control
+		skip_bottom = maxf(skip_bottom, counter.position.y + counter.size.y)
+	$HUD/TutorialSkip.position = Vector2(width - 100.0, skip_bottom + 8.0)
+	$HUD/TutorialSkip.size = Vector2(88.0, 32.0)
 	_layout_centered_label($HUD/RewardToast, width, 154.0, 30.0, 190.0)
 	# Stage completion can show this together with the 188..240 double-reward
 	# button. Keep the level reward in its own readable row below that action.
@@ -2841,7 +2906,8 @@ func _update_hud() -> void:
 		$HUD/InfoTitle.text = "HOW TO PLAY"
 		$HUD/InfoBody.text = "A / D or LEFT / RIGHT: switch branches\nSwipe left / right to move\nW / UP: jump · S / DOWN: hug\n\nClimb as high as you can. The vine gets faster.\nAvoid falling beans, rocks and broken branches.\nCollect gold and powerups along the way.\nWing Flight lets you fly above obstacles.\n\nESC: pause / resume"
 	$HUD/InfoBack.visible = credits_visible
-	$HUD/TutorialPanel.visible = playing and tutorial_active and tutorial_prompt_visible
+	$HUD/TutorialPanel.visible = playing and tutorial_active
+	$HUD/TutorialArrow.visible = playing and tutorial_active
 	$HUD/TutorialSkip.visible = playing and tutorial_active
 	$HUD/Mute.visible = playing
 	$HUD/RunPause.visible = playing
