@@ -14,14 +14,20 @@ class SpeedLines extends Node2D:
 	var travel := 0.0
 	var opacity := 0.0
 	var hud_exclusions: Array[Rect2] = []
+	var speed_texture: Texture2D
+
+	func _ready() -> void:
+		var path := "res://assets/art/eglence/fx_speed_lines.png"
+		if ResourceLoader.exists(path):
+			speed_texture = load(path)
 
 	func _process(delta: float) -> void:
 		viewport_size = get_viewport_rect().size
 		visible = game.app_state == AppState.PLAYING
 		if not visible:
 			return
-		opacity = clampf((game.player.speed_scale - 1.0) * 0.6, 0.0, 0.9)
-		travel = fposmod(travel + game.player.climb_speed() * delta, maxf(viewport_size.y + 120.0, 1.0))
+		opacity = clampf((game.player.speed_scale - 1.0) * 1.2, 0.0, 0.85) if game.player.speed_scale >= 1.1 else 0.0
+		travel += game.player.climb_speed() * delta
 		hud_exclusions.clear()
 		for control in game.get_node("HUD").get_children():
 			if control is Control and control.is_visible_in_tree() and (control is Label or control is BaseButton or control is TextureRect):
@@ -29,28 +35,55 @@ class SpeedLines extends Node2D:
 		queue_redraw()
 
 	func _draw() -> void:
-		var edge_width := minf(100.0, viewport_size.x * 0.5 - 230.0)
+		# Both textures and strokes end outside the protected gameplay columns.
+		var edge_width := minf(100.0, viewport_size.x * 0.5 - 234.0)
 		if opacity <= 0.0 or edge_width <= 4.0:
 			return
-		var period := viewport_size.y + 120.0
+		var intensity := clampf((game.player.speed_scale - 1.1) / 0.9, 0.0, 1.0)
+		var thickness := lerpf(1.0, 3.5, intensity)
+		var period := viewport_size.y + 240.0
+		if speed_texture != null:
+			var tile_height := lerpf(256.0, 512.0, intensity)
+			for x in [0.0, viewport_size.x - edge_width]:
+				var y := fposmod(travel, tile_height) - tile_height
+				while y < viewport_size.y:
+					_draw_edge_tile(Rect2(x, y, edge_width, tile_height))
+					y += tile_height
 		for index in range(LINE_COUNT):
 			var lane := index / 2
 			var inset := 2.0 + fposmod(float(lane) * 31.0, edge_width - 4.0)
 			var x := inset if index % 2 == 0 else viewport_size.x - inset
-			var y := fposmod(float(index) * period / float(LINE_COUNT) + travel, period) - 120.0
-			var length := 30.0 + float(index % 5) * 16.0
+			var y := fposmod(float(index) * period / float(LINE_COUNT) + travel, period) - 240.0
+			var length := (24.0 + float(index % 5) * 10.0) * lerpf(1.0, 3.5, intensity)
 			var start := Vector2(x, maxf(y, 0.0))
 			var end := Vector2(x, minf(y + length, viewport_size.y))
 			if end.y <= start.y:
 				continue
 			var covered := false
-			var line_rect := Rect2(start - Vector2.ONE, Vector2(2.0, end.y - start.y + 2.0))
+			var line_rect := Rect2(start - Vector2.ONE * thickness, Vector2(thickness * 2.0, end.y - start.y + thickness * 2.0))
 			for exclusion in hud_exclusions:
 				if exclusion.intersects(line_rect):
 					covered = true
 					break
 			if not covered:
-				draw_line(start, end, Color(0.94, 0.97, 1.0, opacity), 1.0)
+				draw_line(start, end, Color(0.94, 0.97, 1.0, opacity), thickness, true)
+
+	func _draw_edge_tile(tile: Rect2) -> void:
+		var pieces: Array[Rect2] = [tile.intersection(Rect2(Vector2.ZERO, viewport_size))]
+		for exclusion in hud_exclusions:
+			var remaining: Array[Rect2] = []
+			for piece in pieces:
+				var cut := piece.intersection(exclusion)
+				if not cut.has_area():
+					remaining.append(piece)
+					continue
+				for rect in [Rect2(piece.position, Vector2(piece.size.x, cut.position.y - piece.position.y)), Rect2(Vector2(piece.position.x, cut.end.y), Vector2(piece.size.x, piece.end.y - cut.end.y)), Rect2(Vector2(piece.position.x, cut.position.y), Vector2(cut.position.x - piece.position.x, cut.size.y)), Rect2(Vector2(cut.end.x, cut.position.y), Vector2(piece.end.x - cut.end.x, cut.size.y))]:
+					if rect.has_area():
+						remaining.append(rect)
+			pieces = remaining
+		for piece in pieces:
+			var source := Rect2((piece.position - tile.position) / tile.size * speed_texture.get_size(), piece.size / tile.size * speed_texture.get_size())
+			draw_texture_rect_region(speed_texture, piece, source, Color(1, 1, 1, opacity))
 
 class SpeakerButton extends Button:
 	var sound_enabled := true:
@@ -2408,7 +2441,16 @@ func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) ->
 			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			row.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			row.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-			for part in ["Icon", "Track", "Fill"]:
+			var icon := TextureRect.new()
+			icon.name = "Icon"
+			icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			var path := "res://assets/art/eglence/hud_%s.png" % PowerupManager.ART_NAMES.get(id, id.to_lower())
+			if ResourceLoader.exists(path):
+				icon.texture = load(path)
+			row.add_child(icon)
+			for part in ["Track", "Fill"]:
 				var rect := ColorRect.new()
 				rect.name = part
 				rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2419,16 +2461,17 @@ func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) ->
 		row.add_theme_font_size_override("font_size", font_size)
 		var definition: Dictionary = powerups.types[id]
 		row.text = "%s  %ds" % [definition.label, ceili(float(powerups.active[id]))]
-		var available_width := maxf(width - 28.0, 1.0)
 		var font := row.get_theme_font("font")
+		var pixel_scale := float(get_tree().root.size.x) / maxf(get_viewport_rect().size.x, 1.0)
+		var icon_size := maxf(font.get_height(font_size), 28.0 / maxf(pixel_scale, 0.001))
+		var available_width := maxf(width - 28.0, 1.0)
 		var lines := maxi(ceili(font.get_string_size(row.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x / available_width), 1)
 		var height := ceilf(font.get_height(font_size) * lines * 1.3) + 14.0
 		row.position = Vector2(x + 28.0, top)
 		row.size = Vector2(available_width, height)
-		var icon := row.get_node("Icon") as ColorRect
-		icon.color = definition.color
-		icon.position = Vector2(-26.0, 6.0)
-		icon.size = Vector2(18.0, 18.0)
+		var icon := row.get_node("Icon") as TextureRect
+		icon.position = Vector2(-icon_size - 2.0, 6.0)
+		icon.size = Vector2(icon_size, icon_size)
 		var track := row.get_node("Track") as ColorRect
 		track.color = Color(0.05, 0.12, 0.10, 0.8)
 		track.position = Vector2(-28.0, height - 8.0)

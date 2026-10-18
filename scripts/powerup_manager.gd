@@ -19,6 +19,11 @@ var game: GameManager
 var rng := RandomNumberGenerator.new()
 var previous_type := ""
 var textures: Dictionary = {}
+const ART_NAMES := {
+	"MAGNET": "magnet_leaf", "DOUBLE": "golden_bean", "WINGS": "wings",
+	"SANDAL": "spring_sandal", "SHIELD": "leaf_shield",
+}
+var fx_textures: Dictionary = {}
 var visual_time := 0.0
 var flight_serial := 0
 var air_coins: Array[GoldCollectible] = []
@@ -30,6 +35,10 @@ func setup(target: PlayerController, stage_manager: StageManager, manager: GameM
 	stages = stage_manager
 	game = manager
 	z_index = 3
+	for effect in ["shield_ring", "shield_burst", "magnet_trail"]:
+		var path := "res://assets/art/eglence/fx_%s.png" % effect
+		if ResourceLoader.exists(path):
+			fx_textures[effect] = load(path)
 	for id: String in types.keys():
 		register_type(id, types[id])
 
@@ -41,7 +50,7 @@ func register_type(id: String, data: Dictionary) -> void:
 	definition["color"] = data.get("color", Color.WHITE)
 	definition["label"] = data.get("label", id)
 	types[id] = definition
-	var path := "res://assets/art/eglence/powerup_%s.png" % id.to_lower()
+	var path := "res://assets/art/eglence/pickup_%s.png" % ART_NAMES.get(id, id.to_lower())
 	if ResourceLoader.exists(path):
 		textures[id] = load(path)
 	elif id == "WINGS":
@@ -201,6 +210,15 @@ func snapshot() -> Dictionary:
 	return {"active": active.duplicate(true), "spawned": spawned, "collected": collected, "next_spawn_time": next_spawn_time, "items": items.duplicate(true)}
 
 func _draw() -> void:
+	if game != null and is_active("MAGNET") and fx_textures.has("magnet_trail"):
+		for coin in game.golds.get_children():
+			if coin is GoldCollectible and coin.magnet_active and not coin.taken:
+				var tip := to_local(coin.sprite.global_position)
+				var direction: Vector2 = coin.sprite.global_position - coin.magnet_origin
+				if direction.length_squared() > 1.0:
+					draw_set_transform(tip, direction.angle())
+					draw_texture_rect(fx_textures.magnet_trail, Rect2(-minf(direction.length(), 80.0), -10.0, minf(direction.length(), 80.0), 20.0), false)
+					draw_set_transform(Vector2.ZERO)
 	if player != null and is_active("SHIELD"):
 		_draw_leaf_ring(player.global_position + player.body.position, 0.0, 1.0)
 	if shield_burst_remaining > 0.0:
@@ -208,8 +226,14 @@ func _draw() -> void:
 		_draw_leaf_ring(shield_burst_center, progress * 95.0, 1.0 - progress)
 	for item: Dictionary in items:
 		var id := String(item.type)
-		var center := Vector2(stages.branch_x_at(int(item.route), float(item.y)), float(item.y) + sin(visual_time * 3.5) * 5.0)
+		var center := Vector2(stages.branch_x_at(int(item.route), float(item.y)), float(item.y) + sin(visual_time * 3.5) * 3.0)
 		var color: Color = types[id].color
+		if textures.has(id):
+			var rect := Rect2(center - Vector2(28, 28), Vector2(56, 56))
+			for offset in [Vector2(-2, 0), Vector2(2, 0), Vector2(0, -2), Vector2(0, 2)]:
+				draw_texture_rect(textures[id], Rect2(rect.position + offset, rect.size), false, Color(0.12, 0.09, 0.06, 0.9))
+			draw_texture_rect(textures[id], rect, false)
+			continue
 		draw_circle(center, 22.0, Color(color, 0.25), true, -1.0, true)
 		draw_arc(center, 21.0, 0.0, TAU, 40, color, 2.0, true)
 		if textures.has(id):
@@ -235,6 +259,11 @@ func _draw() -> void:
 			draw_string(ThemeDB.fallback_font, center + Vector2(-14, 15), "×2", HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
 
 func _draw_leaf_ring(center: Vector2, spread: float, alpha: float) -> void:
+	var effect := "shield_burst" if spread > 0.0 else "shield_ring"
+	if fx_textures.has(effect):
+		var size := Vector2(128.0 + spread * 2.0, 148.0 + spread * 2.0)
+		draw_texture_rect(fx_textures[effect], Rect2(center - size * 0.5, size), false, Color(1, 1, 1, alpha))
+		return
 	for index in 8:
 		var angle := visual_time * 2.0 + TAU * float(index) / 8.0
 		var offset := Vector2(cos(angle) * (48.0 + spread), sin(angle) * (58.0 + spread))
