@@ -2464,18 +2464,17 @@ func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) ->
 		var font := row.get_theme_font("font")
 		var pixel_scale := float(get_tree().root.size.x) / maxf(get_viewport_rect().size.x, 1.0)
 		var icon_size := maxf(font.get_height(font_size), 28.0 / maxf(pixel_scale, 0.001))
-		var icon_column := icon_size + 6.0
-		var available_width := maxf(width - icon_column, 1.0)
+		var available_width := maxf(width - 28.0, 1.0)
 		var lines := maxi(ceili(font.get_string_size(row.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x / available_width), 1)
-		var height := maxf(ceilf(font.get_height(font_size) * lines * 1.3), icon_size + 6.0) + 14.0
-		row.position = Vector2(x + icon_column, top)
+		var height := ceilf(font.get_height(font_size) * lines * 1.3) + 14.0
+		row.position = Vector2(x + 28.0, top)
 		row.size = Vector2(available_width, height)
 		var icon := row.get_node("Icon") as TextureRect
-		icon.position = Vector2(-icon_column, 6.0)
+		icon.position = Vector2(-icon_size - 2.0, 6.0)
 		icon.size = Vector2(icon_size, icon_size)
 		var track := row.get_node("Track") as ColorRect
 		track.color = Color(0.05, 0.12, 0.10, 0.8)
-		track.position = Vector2(-icon_column, height - 8.0)
+		track.position = Vector2(-28.0, height - 8.0)
 		track.size = Vector2(width, 6.0)
 		var fill := row.get_node("Fill") as ColorRect
 		fill.color = definition.color
@@ -2489,8 +2488,8 @@ func _layout_gameplay_text(viewport_size: Vector2) -> void:
 	var pixel_scale := window_size.x / maxf(viewport_size.x, 1.0)
 	var minimum_font := ceili(28.0 * (minf(window_size.x, window_size.y) / 1080.0) / maxf(pixel_scale, 0.001))
 	var width := viewport_size.x
-	# Keep the side gutter when it fits; narrow viewports need readable rows.
-	var block_width := maxf(width * 0.5 - 246.0, minf(234.0, width * 0.45))
+	# Persistent counters stay outside the gameplay center +/-230.
+	var block_width := maxf(width * 0.5 - 246.0, 1.0)
 	var x := width - block_width - 12.0
 	var top := 8.0
 	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
