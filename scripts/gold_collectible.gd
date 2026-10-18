@@ -3,7 +3,8 @@ extends Node2D
 
 signal collected(placement_id: String)
 
-const COIN_TEXTURE := preload("res://assets/art/items/gold_coin.png")
+const COIN_TEXTURE := preload("res://assets/art/items/gold_coin_v3.png")
+const COIN_BASE_SCALE := 0.41
 const FEEDBACK_DURATION := 0.4
 const MAGNET_DURATION := 0.15
 
@@ -28,7 +29,7 @@ func _ready() -> void:
 	z_index = 1
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	sprite.texture = COIN_TEXTURE
-	sprite.scale = Vector2.ONE * 0.82
+	sprite.scale = Vector2.ONE * COIN_BASE_SCALE
 	add_child(sprite)
 	if player != null and player.stages != null and player.stages.stage_for_y(global_position.y) > 2:
 		sprite.position.x = ScaleLock.vine_visual_offset(visual_lane, global_position.y)
@@ -64,7 +65,7 @@ func _pick_up() -> void:
 	sparkle_remaining = FEEDBACK_DURATION
 	sprite.modulate.a = 1.0
 	var pop := create_tween()
-	pop.tween_property(sprite, "scale", Vector2.ONE * 0.82 * 1.6, 0.08)
+	pop.tween_property(sprite, "scale", Vector2.ONE * COIN_BASE_SCALE * 1.6, 0.08)
 	pop.tween_property(sprite, "scale", Vector2.ZERO, 0.12)
 	collected.emit(placement_id)
 

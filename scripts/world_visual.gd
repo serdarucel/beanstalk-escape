@@ -1,7 +1,17 @@
 extends Node2D
 
-const STALK_TEXTURE := preload("res://assets/art/world/v2/stalk_tile.png")
-# The body and its raised fibers share a continuous world-Y texture phase.
+const TRUNK_TEXTURE := preload("res://assets/art/world/v3/trunk_body_tile.png")
+const LANE_TEXTURE := preload("res://assets/art/world/v3/lane_vine_tile.png")
+const SIDE_BRANCH_TEXTURES := [
+	preload("res://assets/art/world/v3/side_branch_a.png"),
+	preload("res://assets/art/world/v3/side_branch_b.png"),
+	preload("res://assets/art/world/v3/side_branch_c.png"),
+]
+# Attachment centers measured on the delivered 768 x 768 sprites.
+const SIDE_BRANCH_ROOT_Y := [384.5, 384.0, 383.0]
+const SIDE_BRANCH_SIZE := 215.0
+const SIDE_BRANCH_ROOT_INSET := 25.0
+# Each material keeps its own absolute world-Y phase across cache/stage cuts.
 const BRANCH_DETAILS_TEXTURE := preload("res://assets/art/world/v2/leaves_atlas.png")
 const FOLIAGE_TEXTURE := BRANCH_DETAILS_TEXTURE
 const SKY_TOP := Color("43b8ef")
@@ -12,10 +22,13 @@ const GRIP_DETAIL_SIZE := 12.0
 const MAX_LEAF_SIZE := 110.0
 const VISUAL_OUTLINE_WIDTH := 4.0
 const STEM_GROWTH_SPACING := 240.0
+const STEM_GROWTH_ROOT_INSET := 12.0
+const STEM_GROWTH_ATLAS_ROOT_X := 4.0
 const BRANCH_GROWTH_SPACING := 600.0
 const GROWTH_OVERLAP := 8.0
 const STEM_GROWTH_CELLS := [0, 3, 1, 2, 4, 0]
-const SURFACE_TILE_HEIGHT := 256.0
+const TRUNK_TILE_HEIGHT := 600.0 # 300 world px * 1024 / 512.
+const LANE_TILE_HEIGHT := 184.0 # 46 world px * 1024 / 256.
 const BRANCH_DETAIL_GRID := Vector2(3.0, 2.0)
 const FOLIAGE_CELL := Vector2(256.0, 256.0)
 const SURFACE_SHADER := """
@@ -24,36 +37,20 @@ render_mode unshaded;
 uniform float sunset_mix : hint_range(0.0, 1.0) = 0.0;
 varying float edge_alpha;
 varying float surface_face;
-varying float fiber_face;
 void vertex() {
     edge_alpha = COLOR.a;
-    // R tags ribbons; G distinguishes the body from its raised fibers.
+    // R distinguishes ribbon contours from ordinary textured sprites.
     surface_face = 1.0 - COLOR.r;
-    fiber_face = COLOR.g;
 }
 void fragment() {
     // Out-of-range U is reserved for the fixed-pixel mesh contour.
-    vec4 pigment = (UV.x < 0.0 || UV.x > 1.0)
+    bool contour = surface_face > 0.5 && (UV.x < 0.0 || UV.x > 1.0);
+    vec4 pigment = contour
         ? vec4(0.062745, 0.141176, 0.058824, 1.0)
         : texture(TEXTURE, UV);
-    if (surface_face > 0.5 && UV.x > 2.5) {
-        pigment = vec4(0.02, 0.09, 0.025, 1.0);
-    }
-    if (surface_face > 0.5 && UV.x >= 0.0 && UV.x <= 1.0) {
-        float value = dot(pigment.rgb, vec3(0.299, 0.587, 0.114));
-        float tone = clamp((value - 0.10) / 0.62, 0.0, 1.0);
-        vec3 shade = vec3(60.0, 150.0, 14.0) / 255.0;
-        vec3 middle = vec3(90.0, 190.0, 15.0) / 255.0;
-        vec3 light = vec3(163.0, 228.0, 37.0) / 255.0;
-        vec3 body = mix(shade, middle, smoothstep(0.0, 0.55, tone));
-        body = mix(body, light, smoothstep(0.55, 1.0, tone));
-        vec3 fiber = clamp(body * vec3(1.12, 1.04, 1.0) + vec3(0.025, 0.015, 0.012), 0.0, 1.0);
-        pigment.rgb = mix(body, fiber, fiber_face);
-        float rim = 1.0 - smoothstep(0.10, 0.15, UV.x);
-        float shadow = smoothstep(0.80, 0.88, UV.x);
-        vec3 rim_color = mix(vec3(0.72, 0.96, 0.15), vec3(0.91, 0.92, 0.22), sunset_mix);
-        pigment.rgb = mix(pigment.rgb, rim_color, rim * mix(0.28, 0.72, fiber_face));
-        pigment.rgb = mix(pigment.rgb, shade, shadow * 0.35 * fiber_face);
+    if (!contour && surface_face > 0.5) {
+        // Keep the painted lighting; sunset only adds a restrained warm tint.
+        pigment.rgb *= mix(vec3(1.0), vec3(1.04, 1.0, 0.94), sunset_mix);
     }
     COLOR = vec4(pigment.rgb, pigment.a * edge_alpha);
 }
@@ -128,11 +125,10 @@ func _draw() -> void:
 	var camera_top := cached_camera_top if not is_inf(cached_camera_top) else _camera_top()
 	if qa_sky_only:
 		return
-	_draw_trunk(camera_top)
 	if not qa_support_mask:
 		_draw_trunk_features(camera_top)
+	_draw_trunk(camera_top)
 	_draw_stage_branches(camera_top)
-	_flush_branch_details()
 
 func _draw_sky(_camera_top: float) -> void:
 	if sky_visual != null:
@@ -164,8 +160,9 @@ func _draw_trunk(camera_top: float) -> void:
 			break
 		y = maxf((ceilf(y / 12.0) - 1.0) * 12.0, visible_top)
 	# The outer fibers straddle this single body's horizontal edges.
-	_draw_textured_ribbon(centers, widths, 0.0, true)
 	_draw_stem_growth(visible_top, visible_bottom)
+	_flush_branch_details()
+	_draw_textured_ribbon(centers, widths, 0.0, true)
 
 func _body_section(world_y: float) -> Vector2:
 	var entry_y := _stage_3_bottom_y()
@@ -371,19 +368,26 @@ func _draw_branch_tip_detail(_base: Vector2, _direction: Vector2, _route: int, _
 	pass
 
 func _draw_outer_growth(cell: int, root: Vector2, side: float, size: float) -> void:
-	# Keep the entire sprite rectangle beyond the curved body silhouette.
-	var outer_x := root.x * side
-	var top := root.y - size * 0.5
-	var steps := int(ceilf(size / 6.0))
-	for step in range(steps + 1):
-		var sample_y := lerpf(top, top + size, float(step) / float(steps))
-		outer_x = maxf(outer_x, _outer_growth_edge(sample_y, side) * side + 0.25)
-	_draw_attached_growth(cell, Vector2(side * outer_x, root.y), side, size)
+	# Attach at the root's own Y, not the outermost point of the whole sprite.
+	# Use the painted edge without the cast-shadow clearance for foreground leaves.
+	var section := _body_section(root.y)
+	var outer_x := section.x * side + section.y * 0.5 + VISUAL_OUTLINE_WIDTH
+	if stages != null and root.y <= _stage_3_bottom_y():
+		var route := 0 if side < 0.0 else 2
+		var stage_number := stages.stage_for_y(root.y)
+		var length := stages.stage_length(stage_number)
+		var progress := (stages.stage_bottom_y(stage_number) - root.y) / length
+		for segment: Array in stages.support_segments(stage_number, route):
+			# In gaps or a tapered endpoint, bury the root under the continuous body.
+			if (progress - float(segment[0])) * length >= 42.0 and (float(segment[1]) - progress) * length >= 42.0:
+				outer_x = maxf(outer_x, _branch_visual_x(route, root.y) * side + _branch_painted_width(route, root.y) * 0.5 + VISUAL_OUTLINE_WIDTH)
+				break
+	_draw_attached_growth(cell, Vector2(side * (outer_x - STEM_GROWTH_ROOT_INSET), root.y), side, size)
 
 func _draw_attached_growth(cell: int, root: Vector2, side: float, size: float) -> void:
-	# Atlas roots are at left-center; mirror for the left side of a support.
+	# Compensate the measured transparent gutter before mirroring the root.
 	var extent := minf(size, MAX_LEAF_SIZE)
-	var center := root + Vector2(side * extent * 0.5, 0.0)
+	var center := root + Vector2(side * extent * (0.5 - STEM_GROWTH_ATLAS_ROOT_X / FOLIAGE_CELL.x), 0.0)
 	_draw_branch_detail_sprite(cell, center, Vector2.ONE * extent, 0.0, side < 0.0)
 
 func _detail_noise(stage_number: int, route: int, node_index: int, channel: int) -> float:
@@ -436,6 +440,7 @@ func _draw_textured_ribbon(points: PackedVector2Array, widths: PackedFloat32Arra
 	var colors := PackedColorArray()
 	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
+	var tile_height := TRUNK_TILE_HEIGHT if fiber_face < 0.5 else LANE_TILE_HEIGHT
 	# Face, contour and soft cast shadow share one retained mesh.
 	for row in points.size():
 		var left: Vector2 = strip.left[row]
@@ -457,7 +462,7 @@ func _draw_textured_ribbon(points: PackedVector2Array, widths: PackedFloat32Arra
 			if column == 7:
 				alpha = 0.28 * fiber_face * tip_scale
 			colors.append(Color(0.0, fiber_face, 1.0, alpha))
-			uvs.append(Vector2(across[column], points[row].y / SURFACE_TILE_HEIGHT))
+			uvs.append(Vector2(across[column], points[row].y / tile_height))
 		if row > 0:
 			for column in 8:
 				var base := (row - 1) * 9 + column
@@ -473,7 +478,10 @@ func _draw_textured_ribbon(points: PackedVector2Array, widths: PackedFloat32Arra
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	draw_mesh_cache.append(mesh)
-	draw_mesh(mesh, STALK_TEXTURE)
+	if fiber_face < 0.5:
+		draw_mesh(mesh, TRUNK_TEXTURE)
+	else:
+		draw_mesh(mesh, LANE_TEXTURE)
 
 func _build_ribbon_mesh(vertices: PackedVector2Array, uvs: PackedVector2Array, indices: PackedInt32Array) -> ArrayMesh:
 	var arrays := []
@@ -517,18 +525,21 @@ func _draw_trunk_features(camera_top: float) -> void:
 	while float(node) * BRANCH_GROWTH_SPACING <= bottom:
 		var y := float(node) * BRANCH_GROWTH_SPACING
 		var side := -1.0 if posmod(node, 2) == 0 else 1.0
-		var root := Vector2(_outer_growth_edge(y, side), y)
-		var points := PackedVector2Array()
-		var widths := PackedFloat32Array()
-		var reach := 115.0 + 10.0 * float(posmod(node, 3))
-		for step in range(19):
-			var t := float(step) / 18.0
-			# A short outward shoot turns upward; it never crosses a lane.
-			points.append(root + Vector2(side * reach * sin(t * PI * 0.5), -125.0 * t * t))
-			widths.append(lerpf(40.0, 8.0, t))
-		_draw_textured_ribbon(points, widths, 1.0, false, side)
-		var tip := points[points.size() - 1] - Vector2(side * GROWTH_OVERLAP, 0.0)
-		_draw_outer_growth(posmod(node, 3), tip, side, 80.0 + 10.0 * float(posmod(node, 4)))
+		var variant := posmod(node, SIDE_BRANCH_TEXTURES.size())
+		var texture: Texture2D = SIDE_BRANCH_TEXTURES[variant]
+		var scale := SIDE_BRANCH_SIZE / texture.get_width()
+		var root_x := _outer_growth_edge(y, side) * side - SIDE_BRANCH_ROOT_INSET
+		# Hide the entire cut under the body even where the outer support is absent.
+		# Sample the root's ~31 px height without changing the body/support geometry.
+		for offset in [-16.0, 0.0, 16.0]:
+			var section := _body_section(y + offset)
+			root_x = minf(root_x, section.x * side + section.y * 0.5 - VISUAL_OUTLINE_WIDTH)
+		var root := Vector2(side * root_x, y)
+		# Mirroring this local transform keeps the measured root fixed on either side.
+		# The full sprite is at most 215 - 25 = 190 px outside the growth edge.
+		draw_set_transform(root, 0.0, Vector2(side, 1.0))
+		draw_texture_rect(texture, Rect2(Vector2(0.0, -SIDE_BRANCH_ROOT_Y[variant] * scale), texture.get_size() * scale), false)
+		draw_set_transform(Vector2.ZERO)
 		node += 1
 
 func _draw_foliage_sprite(cell: int, center: Vector2, size: Vector2, flip_x := false, modulate := Color.WHITE) -> void:
@@ -578,21 +589,20 @@ func qa_visual_contract() -> Dictionary:
 		"trunk_entry_blend_height_px": STAGE_3_ENTRY_HEIGHT,
 		"trunk_ground_width_multiplier": 1.3,
 		"trunk_ground_flare_height_px": 480.0,
-		"trunk_face_shadow_rgb": [60, 150, 14],
-		"trunk_face_middle_rgb": [90, 190, 15],
-		"trunk_face_light_rgb": [163, 228, 37],
+		"surface_color_mode": "painted_texture_with_sunset_multiply",
 		"fiber_tip_taper_length_px": 42.0,
 		"fiber_tip_sample_step_px": 3.0,
 		"fiber_endpoint_face_width_px": 0.0,
 		"branch_width_px": [36.0, 56.0],
 		"branch_centers_world_x": Balance.ROUTE_X.duplicate(),
-		"texture_repeat_px": SURFACE_TILE_HEIGHT,
+		"texture_repeat_px": TRUNK_TILE_HEIGHT,
+		"branch_texture_repeat_px": LANE_TILE_HEIGHT,
 		"grip_detail_px": GRIP_DETAIL_SIZE,
 		"max_leaf_px": MAX_LEAF_SIZE,
 		"outline_px": VISUAL_OUTLINE_WIDTH,
-		"surface_texture": "res://assets/art/world/v2/stalk_tile.png",
-		"branch_surface_texture": "res://assets/art/world/v2/stalk_tile.png",
-		"shoot_meshes_per_ribbon": 1,
+		"surface_texture": "res://assets/art/world/v3/trunk_body_tile.png",
+		"branch_surface_texture": "res://assets/art/world/v3/lane_vine_tile.png",
+		"shoot_meshes_per_ribbon": 0,
 		"branch_detail_atlas": "res://assets/art/world/v2/leaves_atlas.png",
 		"branch_node_spacing_px": [BRANCH_GROWTH_SPACING, BRANCH_GROWTH_SPACING, BRANCH_GROWTH_SPACING],
 		"stem_growth_spacing_px": STEM_GROWTH_SPACING,
@@ -601,8 +611,12 @@ func qa_visual_contract() -> Dictionary:
 		"split_union_count": 0,
 		"transfer_bridge_count": 0,
 		"side_branch_spacing_px": BRANCH_GROWTH_SPACING,
-		"side_branch_root_width_px": 40.0,
-		"side_branch_tip_leaf_px": [80.0, 110.0],
+		"side_branch_textures": ["res://assets/art/world/v3/side_branch_a.png", "res://assets/art/world/v3/side_branch_b.png", "res://assets/art/world/v3/side_branch_c.png"],
+		"side_branch_sprite_size_px": SIDE_BRANCH_SIZE,
+		"side_branch_max_reach_px": SIDE_BRANCH_SIZE - SIDE_BRANCH_ROOT_INSET,
+		"side_branch_root_inset_px": SIDE_BRANCH_ROOT_INSET,
+		"side_branch_root_width_px": 110.0 * SIDE_BRANCH_SIZE / 768.0,
+		"side_branch_tip_leaf_px": [0.0, 0.0], # Leaves are baked into the side-branch sprites.
 		"stem_edge_growth_px": [60.0, 90.0],
 		"foliage_atlas": "res://assets/art/world/v2/leaves_atlas.png",
 		"procedural_circle_cloud_count": 0,
