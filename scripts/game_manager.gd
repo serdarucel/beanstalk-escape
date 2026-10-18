@@ -264,9 +264,9 @@ func _ready() -> void:
 	_on_viewport_size_changed()
 	_start_selected_run()
 
-func _apply_window_aspect(window_size: Vector2i) -> void:
-	# dikey tam ekran, dünya çiziminin görünür alanı kaplamasını bekliyor (world_visual/world_sky_visual)
-	var aspect := Window.CONTENT_SCALE_ASPECT_EXPAND if window_size.x >= window_size.y else Window.CONTENT_SCALE_ASPECT_KEEP
+func _apply_window_aspect(_window_size: Vector2i) -> void:
+	# Her iki yönde tam ekran; dünya ve gök görünür alanı kamera zoom'una göre kaplar.
+	var aspect := Window.CONTENT_SCALE_ASPECT_EXPAND
 	if get_tree().root.content_scale_aspect != aspect:
 		applying_window_aspect = true
 		get_tree().root.content_scale_aspect = aspect

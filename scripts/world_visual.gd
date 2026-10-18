@@ -72,6 +72,7 @@ var qa_support_mask := false
 var qa_support_mask_include_outline := false
 var qa_sky_only := false
 var cached_camera_top := INF
+var cached_visible_size := Vector2.ZERO
 var sky_visual: Node2D
 var surface_material: ShaderMaterial
 var draw_mesh_cache: Array[ArrayMesh] = []
@@ -93,6 +94,7 @@ func _ready() -> void:
 	sky_visual.setup(player, stages)
 	add_child(sky_visual)
 	cached_camera_top = _camera_top()
+	cached_visible_size = _visible_size()
 	queue_redraw()
 	set_process(true)
 
@@ -101,16 +103,26 @@ func _process(_delta: float) -> void:
 		var sunset: float = sky_visual.sunset_mix_at(stages.stage_for_y(player.global_position.y), stages.progress_in_stage(player.global_position.y))
 		surface_material.set_shader_parameter("sunset_mix", sunset)
 	var current_camera_top := _camera_top()
-	if absf(current_camera_top - cached_camera_top) >= SURFACE_CACHE_SCROLL_PX:
+	var current_visible_size := _visible_size()
+	if current_visible_size != cached_visible_size or absf(current_camera_top - cached_camera_top) >= SURFACE_CACHE_SCROLL_PX:
 		cached_camera_top = current_camera_top
+		cached_visible_size = current_visible_size
 		queue_redraw()
+
+func _visible_size() -> Vector2:
+	var zoom := Vector2.ONE
+	if player != null:
+		var camera := player.get_node_or_null("Camera2D") as Camera2D
+		if camera != null:
+			zoom = camera.zoom
+	return get_viewport_rect().size / zoom
 
 func _camera_top() -> float:
 	var result := player.global_position.y - ScaleLock.CHARACTER_REFERENCE_Y if player != null else -270.0
 	if player != null:
 		var camera := player.get_node_or_null("Camera2D") as Camera2D
 		if camera != null:
-			result = camera.get_screen_center_position().y - get_viewport_rect().size.y * 0.5
+			result = camera.get_screen_center_position().y - _visible_size().y * 0.5
 	return result
 
 func _draw() -> void:
@@ -128,7 +140,8 @@ func _draw() -> void:
 	if not qa_support_mask:
 		_draw_trunk_features(camera_top)
 	_draw_trunk(camera_top)
-	_draw_stage_branches(camera_top)
+	# Use viewport-aware clipping here, including the endless scene's resident stages.
+	_draw_visible_stage_branches(camera_top)
 
 func _draw_sky(_camera_top: float) -> void:
 	if sky_visual != null:
@@ -146,7 +159,7 @@ func _draw_trunk(camera_top: float) -> void:
 		_draw_support_trunk(camera_top)
 		return
 	var visible_top := camera_top - 160.0 - SURFACE_CACHE_MARGIN_PX
-	var visible_bottom := minf(740.0, camera_top + 716.0 + SURFACE_CACHE_MARGIN_PX)
+	var visible_bottom := minf(740.0, camera_top + _visible_size().y + 176.0 + SURFACE_CACHE_MARGIN_PX)
 	if visible_bottom <= visible_top:
 		return
 	var centers := PackedVector2Array()
@@ -194,7 +207,7 @@ func _draw_support_trunk(camera_top: float) -> void:
 	# Retain the old narrow support geometry independently of the painted body.
 	var transition_top_y := _stage_3_bottom_y() - STAGE_3_ENTRY_HEIGHT
 	var visible_top := maxf(transition_top_y, camera_top - 64.0 - SURFACE_CACHE_MARGIN_PX)
-	var visible_bottom := minf(740.0, camera_top + 620.0 + SURFACE_CACHE_MARGIN_PX)
+	var visible_bottom := minf(740.0, camera_top + _visible_size().y + 80.0 + SURFACE_CACHE_MARGIN_PX)
 	if visible_bottom <= visible_top:
 		return
 	var centers := PackedVector2Array()
@@ -253,13 +266,16 @@ func _trunk_half_width(world_y: float) -> float:
 	return 90.0 + sin(world_y * TAU / 470.0) * 7.0 + sin(world_y * TAU / 150.0) * 3.0
 
 func _draw_stage_branches(camera_top: float) -> void:
-	var visible_bottom := camera_top + 556.0 + 160.0 + SURFACE_CACHE_MARGIN_PX
+	_draw_visible_stage_branches(camera_top)
+
+func _draw_visible_stage_branches(camera_top: float) -> void:
+	var visible_bottom := camera_top + _visible_size().y + 16.0 + 160.0 + SURFACE_CACHE_MARGIN_PX
 	var visible_top := camera_top - 160.0 - SURFACE_CACHE_MARGIN_PX
 	for route in 3:
 		# Union touching support intervals before clipping or building geometry.
 		# A stage/support boundary is not a botanical endpoint.
 		var spans: Array[Vector3] = []
-		for stage_number in range(3, Balance.STAGE_COUNT + 1):
+		for stage_number in range(maxi(3, stages.first_stage), stages.last_stage + 1):
 			var bottom := stages.stage_bottom_y(stage_number)
 			var length := stages.stage_length(stage_number)
 			for segment: Array in stages.support_segments(stage_number, route):
@@ -520,7 +536,7 @@ func _ribbon_geometry(points: PackedVector2Array, widths: PackedFloat32Array, ex
 
 func _draw_trunk_features(camera_top: float) -> void:
 	var top := camera_top - SURFACE_CACHE_MARGIN_PX - 160.0
-	var bottom := minf(620.0, camera_top + 620.0 + SURFACE_CACHE_MARGIN_PX + 160.0)
+	var bottom := minf(620.0, camera_top + _visible_size().y + 80.0 + SURFACE_CACHE_MARGIN_PX + 160.0)
 	var node := int(ceilf(top / BRANCH_GROWTH_SPACING))
 	while float(node) * BRANCH_GROWTH_SPACING <= bottom:
 		var y := float(node) * BRANCH_GROWTH_SPACING
