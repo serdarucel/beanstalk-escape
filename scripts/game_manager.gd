@@ -219,6 +219,9 @@ var ghost_stage_elapsed := 0.0
 var ghost_sample_elapsed := 0.0
 var ghost_best_time := 0.0
 var pet_follower: Node2D
+var sky_day_clear_color := Color.BLACK
+var sky_sunset_clear_color := Color.BLACK
+var applying_window_aspect := false
 
 func _ready() -> void:
 	process_physics_priority = 10
@@ -254,9 +257,52 @@ func _ready() -> void:
 	pet_follower.setup(player, final_character)
 	_sync_pet()
 	economy.changed.connect(_sync_pet)
-	layout_hud_for_viewport(get_viewport_rect().size)
-	get_viewport().size_changed.connect(func(): layout_hud_for_viewport(get_viewport_rect().size))
+	sky_day_clear_color = _sky_texture_middle_color(WorldSkyVisual.SKY_DAY)
+	sky_sunset_clear_color = _sky_texture_middle_color(WorldSkyVisual.SKY_SUNSET)
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
+	_on_viewport_size_changed()
 	_start_selected_run()
+
+func _apply_window_aspect(window_size: Vector2i) -> void:
+	# dikey tam ekran, dünya çiziminin görünür alanı kaplamasını bekliyor (world_visual/world_sky_visual)
+	var aspect := Window.CONTENT_SCALE_ASPECT_EXPAND if window_size.x >= window_size.y else Window.CONTENT_SCALE_ASPECT_KEEP
+	if get_tree().root.content_scale_aspect != aspect:
+		applying_window_aspect = true
+		get_tree().root.content_scale_aspect = aspect
+		applying_window_aspect = false
+	_update_sky_clear_color()
+
+func _on_viewport_size_changed() -> void:
+	# Changing the stretch aspect can synchronously emit size_changed again.
+	if applying_window_aspect:
+		return
+	_apply_window_aspect(DisplayServer.window_get_size())
+	layout_hud_for_viewport(get_viewport_rect().size)
+
+func _sky_texture_middle_color(texture: Texture2D) -> Color:
+	var image := texture.get_image()
+	if image.is_compressed():
+		image.decompress()
+	return image.get_pixel(image.get_width() / 2, image.get_height() / 2)
+
+func _process(_delta: float) -> void:
+	_update_sky_clear_color()
+
+func _update_sky_clear_color() -> void:
+	if get_tree().root.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
+		RenderingServer.set_default_clear_color(Color.BLACK)
+		return
+	# Match the sky's day/sunset blend; sample its textures only once at startup.
+	var stage_number := stages.stage_for_y(player.global_position.y)
+	var progress := stages.progress_in_stage(player.global_position.y)
+	var sunset := smoothstep(12.0, 20.0, float(stage_number) + progress)
+	var sky_color := sky_day_clear_color.lerp(sky_sunset_clear_color, sunset)
+	var storm := smoothstep(15.0, 17.0, float(stage_number) + progress)
+	sky_color = sky_color.blend(Color(0.48, 0.30, 0.62, 0.075 * storm))
+	if stage_number >= 20:
+		var flash := pow(maxf(sin(Time.get_ticks_msec() * 0.0017 + float(stage_number)), 0.0), 18.0)
+		sky_color = sky_color.blend(Color(0.86, 0.83, 0.95, flash * 0.055))
+	RenderingServer.set_default_clear_color(sky_color)
 
 func _physics_process(delta: float) -> void:
 	if app_state == AppState.RESUMING:
@@ -2298,7 +2344,12 @@ func bump_gold_counter() -> void:
 
 func _layout_run_coin_icon() -> void:
 	var label := $HUD/RunCoins as Label
-	$HUD/RunCoins/Icon.position = Vector2(label.size.x - label.get_minimum_size().x - 28.0, 3.0)
+	var icon := $HUD/RunCoins/Icon as TextureRect
+	var font := label.get_theme_font("font")
+	var text_width := font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.get_theme_font_size("font_size")).x
+	var text_left := maxf(label.size.x - text_width, 0.0)
+	var gap := 4.0 + label.get_theme_constant("outline_size")
+	icon.position = Vector2(text_left - gap - icon.size.x, (label.size.y - icon.size.y) * 0.5)
 
 func show_gold_combo(multiplier: int) -> void:
 	var label := $HUD/GoldCombo as Label
