@@ -82,7 +82,7 @@ class HeartIcon extends Control:
 		]), color)
 
 enum State { PLAYING, PLAYER_DEAD, PROTOTYPE_COMPLETE }
-enum AppState { MENU, INTRO, PLAYING, PAUSED, PLAYER_DEAD, FINAL_CINEMATIC, GAME_COMPLETE, SHOP, CHARACTER_SELECT, MAP, CREDITS }
+enum AppState { MENU, INTRO, PLAYING, PAUSED, PLAYER_DEAD, FINAL_CINEMATIC, GAME_COMPLETE, SHOP, CHARACTER_SELECT, MAP, CREDITS, RESUMING }
 enum DeathCause { NONE, FALL, CAUGHT, OBSTACLE }
 var state := State.PLAYING
 var app_state := AppState.MENU
@@ -171,6 +171,8 @@ var ad_revives_by_stage := {}
 var completed_since_interstitial := 0
 var platform_pause_active := false
 var paused_by_platform := false
+var focus_pause_active := false
+var resume_countdown_remaining := 0.0
 var mode := MODE_NORMAL
 var challenge_eligible := true
 var damage_events := 0
@@ -257,6 +259,14 @@ func _ready() -> void:
 	_start_selected_run()
 
 func _physics_process(delta: float) -> void:
+	if app_state == AppState.RESUMING:
+		if not platform_pause_active and not focus_pause_active and resume_countdown_remaining > 0.0:
+			resume_countdown_remaining = maxf(resume_countdown_remaining - delta, 0.0)
+			if resume_countdown_remaining <= 0.0:
+				_resume_game()
+		_update_hud()
+		_publish_readonly_web_state()
+		return
 	if app_state == AppState.PLAYER_DEAD and death_phase == "result" and not leaderboard_visible:
 		result_elapsed += delta
 		if result_elapsed >= 1.0:
@@ -411,7 +421,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		dispatch_command("move_right", "keyboard")
 	if event.is_action_pressed("ui_accept") and not (event is InputEventKey and event.echo):
 		_request_confirm()
-	if event.is_action_pressed("pause") and app_state == AppState.PLAYING:
+	if event.is_action_pressed("pause") and app_state in [AppState.PLAYING, AppState.RESUMING]:
 		_pause_game()
 	elif event.is_action_pressed("pause") and app_state == AppState.PAUSED:
 		_resume_game()
@@ -423,8 +433,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_handle_screen_touch(event)
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_node_ready() and app_state == AppState.PLAYING:
-		_pause_game()
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		focus_pause_active = true
+		_update_automatic_pause()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		focus_pause_active = false
+		_update_automatic_pause()
 
 func _exit_tree() -> void:
 	economy.flush_climb_save()
@@ -475,6 +491,8 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 		dispatch_command("move_left" if displacement.x < 0.0 else "move_right", "mobile")
 
 func restart() -> void:
+	paused_by_platform = false
+	resume_countdown_remaining = 0.0
 	economy.begin_run()
 	resume_available = false
 	_clear_direction_inputs()
@@ -957,8 +975,9 @@ func _enter_player_dead(cause: DeathCause) -> void:
 	for bean in get_tree().get_nodes_in_group("beans"):
 		bean.set_physics_process(false)
 	if not tutorial_active:
-		death_phase = "continue"
-		if not _can_offer_ad_revive() or not platform_services.is_rewarded_supported():
+		if _can_offer_ad_revive() and platform_services.is_rewarded_supported():
+			death_phase = "continue"
+		else:
 			_show_run_result()
 	_update_hud()
 	call_deferred("_focus_default_death_action")
@@ -1114,10 +1133,12 @@ func _spider_can_catch() -> bool:
 	var claw_half_width := ScaleLock.BRANCH_CENTER_GAP + ScaleLock.BRANCH_WIDTH * 0.5
 	return gauge.distance_px <= Balance.CATCH_DISTANCE and absf(player.global_position.x - spider.global_position.x) <= claw_half_width
 
-func _pause_game() -> void:
+func _pause_game(automatic := false) -> void:
 	audio.play_sfx("ui_click")
 	_clear_direction_inputs()
-	app_state = AppState.PAUSED
+	paused_by_platform = automatic
+	resume_countdown_remaining = 0.0
+	app_state = AppState.RESUMING if automatic else AppState.PAUSED
 	player.set_physics_process(false)
 	spider.set_physics_process(false)
 	beans.set_physics_process(false)
@@ -1126,8 +1147,9 @@ func _pause_game() -> void:
 	_update_hud()
 
 func _resume_game() -> void:
-	if platform_pause_active:
+	if platform_pause_active or focus_pause_active or resume_countdown_remaining > 0.0:
 		return
+	paused_by_platform = false
 	audio.play_sfx("ui_click")
 	app_state = AppState.PLAYING
 	player.set_physics_process(true)
@@ -1335,12 +1357,15 @@ func _get_more_gold_with_ad() -> void:
 
 func _on_platform_pause_changed(value: bool) -> void:
 	platform_pause_active = value
-	if value and app_state == AppState.PLAYING:
-		paused_by_platform = true
-		_pause_game()
-	elif not value and paused_by_platform and app_state == AppState.PAUSED:
-		paused_by_platform = false
-		_resume_game()
+	_update_automatic_pause()
+
+func _update_automatic_pause() -> void:
+	if platform_pause_active or focus_pause_active:
+		if app_state in [AppState.PLAYING, AppState.RESUMING]:
+			_pause_game(true)
+	elif paused_by_platform and app_state == AppState.RESUMING and resume_countdown_remaining <= 0.0:
+		resume_countdown_remaining = 3.0
+		_update_hud()
 
 func _on_remove_ads_ownership_changed(value: bool) -> void:
 	save_manager.set_remove_ads(value)
@@ -1698,6 +1723,11 @@ func _setup_hud() -> void:
 	intro_panel.content_margin_bottom = 12.0
 	intro_label.add_theme_stylebox_override("normal", intro_panel)
 	_add_label("Pause", Vector2(315, 235), "PAUSED - ESC TO RESUME", 22)
+	var countdown := _add_label("ResumeCountdown", Vector2.ZERO, "", 96)
+	countdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	countdown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	countdown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	countdown.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_add_label("StageBanner", Vector2(360, 90), "", 20)
 	_add_label("StageCounter", Vector2(16, 62), "STAGE 1 / 30", 14)
 	var lives := Control.new()
@@ -2456,6 +2486,8 @@ func _update_hud() -> void:
 	var meta_visible := normal_playing or result_visible
 	$HUD/Menu.visible = app_state == AppState.MENU
 	$HUD/Pause.visible = app_state == AppState.PAUSED
+	$HUD/ResumeCountdown.visible = app_state == AppState.RESUMING and resume_countdown_remaining > 0.0
+	$HUD/ResumeCountdown.text = str(clampi(int(ceil(resume_countdown_remaining)), 1, 3))
 	$HUD/Pause.text = "PAUSED · TAP TO RESUME" if DisplayServer.is_touchscreen_available() else "PAUSED · ESC TO RESUME"
 	$HUD/Dead.visible = app_state == AppState.PLAYER_DEAD
 	$HUD/Dead.text = ("NEW HIGH SCORE!" if result_new_best else "SCORE %s" % _format_run_number(int(score))) if death_phase == "result" else _death_text()
@@ -2518,7 +2550,7 @@ func _update_hud() -> void:
 	var run_result_visible := death_visible and death_phase == "result"
 	var board_visible := run_result_visible and leaderboard_visible
 	$HUD/DeathBackdrop.visible = death_visible
-	$HUD/ContinueAd.visible = continue_visible
+	$HUD/ContinueAd.visible = continue_visible and platform_services.is_rewarded_supported()
 	$HUD/NoThanks.visible = continue_visible
 	$HUD/RunBest.visible = run_result_visible
 	$HUD/RunBest.text = "BEST %s" % _format_run_number(result_best)
@@ -2754,7 +2786,6 @@ func _readonly_state_snapshot() -> Dictionary:
 		"danger_remaining": danger_remaining,
 		"lives": {"current": current_lives, "max": max_lives, "invulnerable_remaining": hit_invulnerability_remaining},
 		"revive_panel": app_state == AppState.PLAYER_DEAD and current_lives <= 0,
-		"fake_ad": platform_services.fake_ad_snapshot(),
 		"stage": stages.stage_for_y(player.global_position.y),
 		"player": {"x": player.global_position.x, "y": player.global_position.y, "vy": player.velocity.y},
 		"player_visual": player_visual,
