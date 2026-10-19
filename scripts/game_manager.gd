@@ -2417,9 +2417,19 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	for line in tutorial_panel.text.split("\n"):
 		lines += maxi(1, ceili(tutorial_panel.get_theme_font("font").get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x / text_width))
 	var text_height := tutorial_panel.get_theme_font("font").get_height(tutorial_font)
-	tutorial_panel.position = Vector2((width - tutorial_width) * 0.5, 112.0)
-	tutorial_panel.size = Vector2(tutorial_width, text_height * lines + 12.0)
-	$HUD/TutorialArrow.position = Vector2(width * 0.5 - 64.0, tutorial_panel.position.y + tutorial_panel.size.y)
+	# Keep the gesture at its original position, independent of panel wrapping.
+	var tutorial_arrow_y := 112.0 + text_height * lines + 12.0
+	if not portrait:
+		# Base sprites reach 242px from the pivot (303px at 1.25x jump).
+		# Reserve 320px outside the left lane, plus a 14px gap on each side.
+		tutorial_width = maxf(72.0, minf(240.0, width * 0.5 - 150.0 - 320.0 - 28.0))
+	tutorial_panel.position = Vector2((width - tutorial_width) * 0.5 if portrait else 14.0, 112.0 if portrait else 124.0)
+	tutorial_panel.size = Vector2(tutorial_width, 0.0)
+	# Ask the Label for word wrapping; width/average glyph counts undercount
+	# short words in the narrow landscape column, especially on TRY AGAIN.
+	var wrapped_lines := tutorial_panel.get_line_count()
+	tutorial_panel.size.y = text_height * wrapped_lines + maxf(0.0, wrapped_lines - 1) * tutorial_panel.get_theme_constant("line_spacing") + 12.0
+	$HUD/TutorialArrow.position = Vector2(width * 0.5 - 64.0, tutorial_arrow_y)
 	$HUD/TutorialArrow.size = Vector2(128.0, text_height * 2.0 + 20.0)
 	var skip_bottom := 8.0
 	for key in ["Score", "Meters", "RunCoins", "Multiplier"]:
