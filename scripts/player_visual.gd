@@ -28,6 +28,10 @@ const ART_SCALE := 0.49
 const BASE_Y := -7.2
 const EXPLORER_SCALE := 238.0 * ART_SCALE / 201.0
 const GAMEPLAY_VISUAL_SCALE := 4.15
+# Maximum nontransparent climb silhouette, at the unchanged 1:1 gameplay zoom.
+# The original spider climb_1/climb_3 silhouette is 117 px tall (not its 152px canvas).
+const GAMEPLAY_CHARACTER_HEIGHT := 117.0 * 1.5
+const EXPLORER_CLIMB_SOURCE_HEIGHTS := {"erkek": 879.0, "kadin": 875.0}
 const EXPLORER_FOOT_Y := BASE_Y + (269.0 - 300.0 * 0.5) * ART_SCALE
 const WINGS_TARGET_WIDTH := ScaleLock.CHARACTER_WIDTH * 1.8
 const TIME_WINGS_VISIBLE_RATIO := 1344.0 / 1415.0
@@ -260,6 +264,9 @@ func _update_explorer_mode(player: PlayerController, app_state: int, delta: floa
 	else:
 		mode = "climb"
 		_animate_explorer("climb", delta)
+		# Keep the Mixamo frames, with the same body lift and clock as 6098189.
+		climb_time += delta * FRAME_RATE
+		sprite.position.y -= 3.5 * absf(sin(climb_time * PI * 0.5))
 	# Manual jump/slide follow action progress; lane transfers and hit keep priority.
 	_was_transferring = transferring
 	_update_transfer_trails(transferring, delta)
@@ -582,6 +589,9 @@ func _load_explorer_art(outfit_id: String) -> void:
 			_explorer_masks[animation] = load(mask_path) as Texture2D
 	# All outfits share the calibrated Mixamo geometry, grid and anchors.
 	_explorer_scale = float(_explorer_meta.get("visual_scale", EXPLORER_SCALE))
+	if get_parent() is PlayerController:
+		# Calibrate the drawing only; Body retains the controller's action poses.
+		_explorer_scale = GAMEPLAY_CHARACTER_HEIGHT / float(EXPLORER_CLIMB_SOURCE_HEIGHTS[kind]) / gameplay_visual_mult
 	var source_scale := float(_explorer_meta.get("source_scale", 1.0))
 	flash_material.set_shader_parameter("outline_source_px", 0.0)
 	flash_material.set_shader_parameter("shadow_source_offset", Vector2(0.0, 7.0) * source_scale)

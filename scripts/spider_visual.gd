@@ -11,9 +11,9 @@ const FRAMES := [
 	preload("res://assets/art/gpt/spider/idle.png"),
 ]
 
-# Keep the 176x152 frames near native size, slightly taller than the player.
+# Double the original drawing; Body resets/intro scaling and collision stay independent.
 # At far_gap the native upper leg tips cross the bottom edge; the body stays below it.
-const VISUAL_SCALE := 1.0
+const VISUAL_SCALE := 2.0
 const BASE_POSITION := Vector2(0, -8)
 const FRAME_ALPHA_TOP := [31.0, 43.0, 31.0, 40.0, 24.0, 37.0, 33.0, 40.0]
 const FRAME_ALPHA_BOTTOM := 144.0
