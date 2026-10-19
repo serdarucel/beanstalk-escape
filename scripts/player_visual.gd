@@ -86,6 +86,7 @@ var _explorer_kind := ""
 var _explorer_anim_time := 0.0
 var _explorer_previous_app_state := -1
 var _explorer_respawning := false
+var _explorer_scale := EXPLORER_SCALE
 
 func _ready() -> void:
 	if get_parent() is PlayerController:
@@ -276,13 +277,26 @@ func _set_explorer_frame(animation: String, index: int) -> void:
 	if frame_name != animation:
 		_explorer_anim_time = 0.0
 	frame_name = animation
+	var data: Dictionary = _explorer_meta["anims"][animation]
 	var texture := frame_textures[animation] as Texture2D
 	if sprite.texture != texture:
 		sprite.frame = 0
 		sprite.hframes = 1
+		sprite.vframes = 1
 		sprite.texture = texture
-		sprite.hframes = int(_explorer_meta["anims"][animation]["frames"])
-	sprite.frame = clampi(index, 0, sprite.hframes - 1)
+		sprite.hframes = int(data.get("cols", data["frames"]))
+		sprite.vframes = int(data.get("rows", 1))
+	var cell: Array = data.get("cell", [_explorer_meta.get("frame_w", 256), _explorer_meta.get("frame_h", 256)])
+	var pivot: Array = data.get("pivot", _explorer_meta.get("pivot", [128, 240]))
+	sprite.offset = Vector2(float(cell[0]), float(cell[1])) * 0.5 - Vector2(float(pivot[0]), float(pivot[1]))
+	sprite.frame = clampi(index, 0, int(data["frames"]) - 1)
+	# Cropped grids have only 8px gutters: keep the enlarged soft shadow in its cell.
+	var uv_rect := Vector4(0.0, 0.0, 1.0, 1.0)
+	if data.has("cell"):
+		var col := sprite.frame % sprite.hframes
+		var row := floori(float(sprite.frame) / float(sprite.hframes))
+		uv_rect = Vector4(float(col) / sprite.hframes, float(row) / sprite.vframes, float(col + 1) / sprite.hframes, float(row + 1) / sprite.vframes)
+	flash_material.set_shader_parameter("frame_uv_rect", uv_rect)
 
 func _update_transfer_trails(transferring: bool, delta: float) -> void:
 	if transferring:
@@ -336,10 +350,15 @@ func _load_skin(requested_skin: String) -> void:
 		frame_name = ""
 		_set_frame(current)
 		return
+	flash_material.set_shader_parameter("outline_source_px", 4.1)
+	flash_material.set_shader_parameter("shadow_source_offset", Vector2(0.0, 7.0))
+	flash_material.set_shader_parameter("shadow_source_blur", 3.0)
+	flash_material.set_shader_parameter("frame_uv_rect", Vector4(0.0, 0.0, 1.0, 1.0))
 	frame_textures.clear()
 	if not _explorer_kind.is_empty():
 		sprite.frame = 0
 		sprite.hframes = 1
+		sprite.vframes = 1
 		sprite.offset = Vector2.ZERO
 		sprite.scale = Vector2.ONE * ART_SCALE
 		sprite.position = _sprite_base_position()
@@ -551,15 +570,22 @@ func _load_explorer_art(outfit_id: String) -> void:
 	anchor_data.clear()
 	for animation in EXPLORER_ANIMS:
 		frame_textures[animation] = load("%s/%s.png" % [folder, animation]) as Texture2D
-	var pivot: Array = _explorer_meta["pivot"]
-	var cell_size := Vector2(float(_explorer_meta["frame_w"]), float(_explorer_meta["frame_h"]))
-	sprite.offset = cell_size * 0.5 - Vector2(float(pivot[0]), float(pivot[1]))
-	sprite.scale = Vector2.ONE * EXPLORER_SCALE * gameplay_visual_mult
+	# Only the new base supplies visual_scale; 256px outfit sets keep EXPLORER_SCALE.
+	_explorer_scale = float(_explorer_meta.get("visual_scale", EXPLORER_SCALE))
+	var source_scale := float(_explorer_meta.get("source_scale", 1.0))
+	flash_material.set_shader_parameter("outline_source_px", float(_explorer_meta.get("outline_source_px", 4.1)))
+	flash_material.set_shader_parameter("shadow_source_offset", Vector2(0.0, 7.0) * source_scale)
+	flash_material.set_shader_parameter("shadow_source_blur", 3.0 * source_scale)
+	sprite.scale = Vector2.ONE * _explorer_scale * gameplay_visual_mult
 	sprite.position = _sprite_base_position()
 
+func _explorer_pivot() -> Array:
+	var data: Dictionary = _explorer_meta["anims"][frame_name]
+	return data.get("pivot", _explorer_meta.get("pivot", [128, 240]))
+
 func _explorer_source_to_local(point: Vector2) -> Vector2:
-	var pivot: Array = _explorer_meta["pivot"]
-	return sprite.position + (point - Vector2(float(pivot[0]), float(pivot[1]))) * EXPLORER_SCALE * gameplay_visual_mult
+	var pivot := _explorer_pivot()
+	return sprite.position + (point - Vector2(float(pivot[0]), float(pivot[1]))) * _explorer_scale * gameplay_visual_mult
 
 func _update_explorer_anchors() -> void:
 	var frames: Array = _explorer_meta["anchors"][frame_name]
@@ -585,10 +611,10 @@ func _update_explorer_anchors() -> void:
 		fairy_effect.visible = pet.visible and not fairy_effect.effect_name.is_empty()
 	if outfit_back_sprite != null:
 		outfit_back_sprite.visible = false
-	var pivot: Array = _explorer_meta["pivot"]
+	var pivot := _explorer_pivot()
 	var body_top := head_center.y - head_width * 0.5
 	var body_height := maxf(float(pivot[1]) - body_top, head_width)
-	var effect_size := Vector2(head_width * 1.65, body_height) * EXPLORER_SCALE * gameplay_visual_mult
+	var effect_size := Vector2(head_width * 1.65, body_height) * _explorer_scale * gameplay_visual_mult
 	var effect_center := _explorer_source_to_local(Vector2(head_center.x, body_top + body_height * 0.5))
 	if outfit_aura != null:
 		outfit_aura.position = effect_center
@@ -679,6 +705,8 @@ uniform vec4 flash_color : source_color = vec4(1.0, 0.35, 0.30, 1.0);
 uniform vec4 outline_color : source_color = vec4(0.035, 0.043, 0.071, 1.0);
 uniform float outline_source_px = 4.1;
 uniform vec2 shadow_source_offset = vec2(0.0, 7.0);
+uniform float shadow_source_blur = 3.0;
+uniform vec4 frame_uv_rect = vec4(0.0, 0.0, 1.0, 1.0);
 void fragment() {
 	vec4 pixel = texture(TEXTURE, UV) * COLOR;
 	vec2 step_size = TEXTURE_PIXEL_SIZE * outline_source_px;
@@ -692,13 +720,15 @@ void fragment() {
 	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(step_size.x, -step_size.y) * 0.707).a);
 	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(-step_size.x, step_size.y) * 0.707).a);
 	vec2 shadow_uv = UV - TEXTURE_PIXEL_SIZE * shadow_source_offset;
-	vec2 blur = TEXTURE_PIXEL_SIZE * 3.0;
+	vec2 blur = TEXTURE_PIXEL_SIZE * shadow_source_blur;
+	vec2 frame_min = frame_uv_rect.xy + TEXTURE_PIXEL_SIZE * 0.5;
+	vec2 frame_max = frame_uv_rect.zw - TEXTURE_PIXEL_SIZE * 0.5;
 	float shadow_alpha = (
-		texture(TEXTURE, shadow_uv).a
-		+ texture(TEXTURE, shadow_uv + vec2(blur.x, 0.0)).a
-		+ texture(TEXTURE, shadow_uv - vec2(blur.x, 0.0)).a
-		+ texture(TEXTURE, shadow_uv + vec2(0.0, blur.y)).a
-		+ texture(TEXTURE, shadow_uv - vec2(0.0, blur.y)).a
+		texture(TEXTURE, clamp(shadow_uv, frame_min, frame_max)).a
+		+ texture(TEXTURE, clamp(shadow_uv + vec2(blur.x, 0.0), frame_min, frame_max)).a
+		+ texture(TEXTURE, clamp(shadow_uv - vec2(blur.x, 0.0), frame_min, frame_max)).a
+		+ texture(TEXTURE, clamp(shadow_uv + vec2(0.0, blur.y), frame_min, frame_max)).a
+		+ texture(TEXTURE, clamp(shadow_uv - vec2(0.0, blur.y), frame_min, frame_max)).a
 	) * 0.056;
 	float border_alpha = max(outline_alpha - pixel.a, 0.0);
 	float backdrop_alpha = max(border_alpha, shadow_alpha * (1.0 - outline_alpha));
