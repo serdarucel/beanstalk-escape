@@ -121,7 +121,7 @@
       ],
       "pivot": [
         272.0,
-        915.0816
+        915.0813
       ]
     },
     "death": {
@@ -136,7 +136,7 @@
       ],
       "pivot": [
         254.0,
-        915.0816
+        915.0813
       ]
     },
     "respawn": {
@@ -151,10 +151,11 @@
       ],
       "pivot": [
         250.0,
-        855.0816
+        855.0813
       ]
     },
     "fly": {
+      "alias": "fall",
       "frames": 6,
       "fps": 12,
       "loop": true,
@@ -997,5 +998,6 @@
   "source_scale": 4.454308093994778,
   "old_h": 191.5,
   "preserved_H": 461.0986542288558,
-  "visual_scale_note": "x1.04 (ana oturum, formul olcumu: tirmanma ekran boyu 899/912 px -> hedef 903-998); onceki 0.13025569689652558"
+  "visual_scale_note": "x1.04 (ana oturum, formul olcumu: tirmanma ekran boyu 899/912 px -> hedef 903-998); onceki 0.13025569689652558",
+  "mask_scale": 0.5
 }

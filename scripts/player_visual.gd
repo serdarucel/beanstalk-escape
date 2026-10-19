@@ -575,8 +575,9 @@ func _load_explorer_art(outfit_id: String) -> void:
 	_explorer_masks.clear()
 	anchor_data.clear()
 	for animation in EXPLORER_ANIMS:
-		frame_textures[animation] = load("%s/%s.png" % [folder, animation]) as Texture2D
-		var mask_path := "%s/%s_mask.png" % [folder, animation]
+		var texture_animation := str(_explorer_meta["anims"][animation].get("alias", animation))
+		frame_textures[animation] = load("%s/%s.png" % [folder, texture_animation]) as Texture2D
+		var mask_path := "%s/%s_mask.png" % [folder, texture_animation]
 		if ResourceLoader.exists(mask_path):
 			_explorer_masks[animation] = load(mask_path) as Texture2D
 	# All outfits share the calibrated Mixamo geometry, grid and anchors.
