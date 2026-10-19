@@ -1673,6 +1673,7 @@ func _show_onboarding_step() -> void:
 		3: "SWIPE DOWN TO HUG" if touch else "PRESS S / ↓ TO HUG",
 	}
 	$HUD/TutorialPanel.text = "%d / 3  %s%s" % [tutorial_step, "TRY AGAIN\n" if tutorial_retry else "", messages.get(tutorial_step, "")]
+	$HUD/TutorialPanel.set_meta("wide_text", $HUD/TutorialPanel.text)
 	$HUD/TutorialSkip.text = "SKIP"
 	_update_hud()
 	layout_hud_for_viewport(get_viewport_rect().size)
@@ -2410,6 +2411,12 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	var tutorial_scale := float(get_tree().root.size.x) / maxf(width, 1.0)
 	var tutorial_font := maxi(24, ceili(36.0 / maxf(tutorial_scale, 0.001)))
 	var tutorial_panel := $HUD/TutorialPanel as Label
+	# Always start from the unchanged wide message, including after rotation.
+	tutorial_panel.text = tutorial_panel.get_meta("wide_text", tutorial_panel.text)
+	tutorial_panel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var tutorial_box := tutorial_panel.get_theme_stylebox("normal") as StyleBoxFlat
+	tutorial_box.content_margin_left = 18.0
+	tutorial_box.content_margin_right = 18.0
 	tutorial_panel.add_theme_font_size_override("font_size", tutorial_font)
 	tutorial_panel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var text_width := tutorial_width - 36.0
@@ -2420,15 +2427,57 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	# Keep the gesture at its original position, independent of panel wrapping.
 	var tutorial_arrow_y := 112.0 + text_height * lines + 12.0
 	if not portrait:
-		# Base sprites reach 242px from the pivot (303px at 1.25x jump).
-		# Reserve 320px outside the left lane, plus a 14px gap on each side.
-		tutorial_width = maxf(72.0, minf(240.0, width * 0.5 - 150.0 - 320.0 - 28.0))
+		# Jump silhouette reaches 303px left of the left lane. Keep a 14px
+		# gap and cap the panel's right edge at 140, including its padding.
+		var available_width := maxf(72.0, minf(126.0, width * 0.5 - 150.0 - 303.0 - 28.0))
+		var font := tutorial_panel.get_theme_font("font")
+		var padding := 12.0
+		var minimum_font := ceili(tutorial_font * 0.8)
+		var wide_text := tutorial_panel.text
+		var message := wide_text.substr(wide_text.find("  ") + 2).trim_prefix("TRY AGAIN\n")
+		var groups := PackedStringArray(["%d / 3" % tutorial_step])
+		if tutorial_retry:
+			groups.append("TRY AGAIN")
+		# Keep action phrases together where space permits; the packing below
+		# splits oversized groups only at spaces, never inside a word.
+		groups.append_array(message.replace(" TO ", "\nTO ").replace(" OR ", "\nOR ").replace(" / ", "\n/ ").split("\n"))
+		var required_width := 0.0
+		while true:
+			required_width = 0.0
+			for word in wide_text.replace("\n", " ").split(" ", false):
+				required_width = maxf(required_width, font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x)
+			if tutorial_retry:
+				required_width = maxf(required_width, font.get_string_size("TRY AGAIN", HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x)
+			if required_width + padding <= available_width or tutorial_font <= minimum_font:
+				break
+			tutorial_font -= 1
+		var preferred_width := required_width
+		for group in groups:
+			preferred_width = maxf(preferred_width, font.get_string_size(group, HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x)
+		tutorial_width = minf(available_width, ceilf(preferred_width) + padding)
+		var narrow_lines := PackedStringArray()
+		for group in groups:
+			var current_line := ""
+			for word in group.split(" ", false):
+				var candidate := word if current_line.is_empty() else current_line + " " + word
+				if not current_line.is_empty() and font.get_string_size(candidate, HORIZONTAL_ALIGNMENT_LEFT, -1, tutorial_font).x > tutorial_width - padding:
+					narrow_lines.append(current_line)
+					current_line = word
+				else:
+					current_line = candidate
+			narrow_lines.append(current_line)
+		tutorial_box.content_margin_left = padding * 0.5
+		tutorial_box.content_margin_right = padding * 0.5
+		tutorial_panel.add_theme_font_size_override("font_size", tutorial_font)
+		tutorial_panel.autowrap_mode = TextServer.AUTOWRAP_WORD
+		tutorial_panel.text = "\n".join(narrow_lines)
 	tutorial_panel.position = Vector2((width - tutorial_width) * 0.5 if portrait else 14.0, 112.0 if portrait else 124.0)
 	tutorial_panel.size = Vector2(tutorial_width, 0.0)
-	# Ask the Label for word wrapping; width/average glyph counts undercount
-	# short words in the narrow landscape column, especially on TRY AGAIN.
+	# Use the shaped line count and the final panel font; arrow metrics above
+	# deliberately retain the original wide-message font and line count.
 	var wrapped_lines := tutorial_panel.get_line_count()
-	tutorial_panel.size.y = text_height * wrapped_lines + maxf(0.0, wrapped_lines - 1) * tutorial_panel.get_theme_constant("line_spacing") + 12.0
+	var panel_text_height := tutorial_panel.get_theme_font("font").get_height(tutorial_font)
+	tutorial_panel.size.y = panel_text_height * wrapped_lines + maxf(0.0, wrapped_lines - 1) * tutorial_panel.get_theme_constant("line_spacing") + 12.0
 	$HUD/TutorialArrow.position = Vector2(width * 0.5 - 64.0, tutorial_arrow_y)
 	$HUD/TutorialArrow.size = Vector2(128.0, text_height * 2.0 + 20.0)
 	var skip_bottom := 8.0
