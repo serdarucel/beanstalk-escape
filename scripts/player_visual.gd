@@ -3,6 +3,7 @@ extends Node2D
 
 const FRAME_ROOT := "res://assets/art/character_frames"
 const EXPLORER_ROOT := "res://assets/art/character3d"
+const EXPLORER_OUTFITS := preload("res://scripts/explorer_outfits.gd")
 const EXPLORER_KINDS := {"M1": "erkek", "F1": "kadin"}
 const EXPLORER_ANIMS := ["climb", "hang", "lane_left", "lane_right", "jump", "slide", "fall", "hit", "death", "respawn", "fly", "front"]
 const WING_TEXTURE := preload("res://assets/art/character_rig/wing/time_wings.png")
@@ -81,6 +82,7 @@ var _time_wings_reveal := 0.0
 var _time_wings_was_active := false
 var _time_wings_target_scale := WINGS_TARGET_WIDTH / (WING_TEXTURE.get_width() * TIME_WINGS_VISIBLE_RATIO)
 var _explorer_meta: Dictionary = {}
+var _explorer_masks: Dictionary = {}
 var _explorer_outfit := ""
 var _explorer_kind := ""
 var _explorer_anim_time := 0.0
@@ -286,6 +288,7 @@ func _set_explorer_frame(animation: String, index: int) -> void:
 		sprite.texture = texture
 		sprite.hframes = int(data.get("cols", data["frames"]))
 		sprite.vframes = int(data.get("rows", 1))
+		EXPLORER_OUTFITS.configure(flash_material, _explorer_outfit, _explorer_masks.get(animation) as Texture2D)
 	var cell: Array = data.get("cell", [_explorer_meta.get("frame_w", 256), _explorer_meta.get("frame_h", 256)])
 	var pivot: Array = data.get("pivot", _explorer_meta.get("pivot", [128, 240]))
 	sprite.offset = Vector2(float(cell[0]), float(cell[1])) * 0.5 - Vector2(float(pivot[0]), float(pivot[1]))
@@ -354,6 +357,8 @@ func _load_skin(requested_skin: String) -> void:
 	flash_material.set_shader_parameter("shadow_source_offset", Vector2(0.0, 7.0))
 	flash_material.set_shader_parameter("shadow_source_blur", 3.0)
 	flash_material.set_shader_parameter("frame_uv_rect", Vector4(0.0, 0.0, 1.0, 1.0))
+	EXPLORER_OUTFITS.configure(flash_material, "", null)
+	_explorer_masks.clear()
 	frame_textures.clear()
 	if not _explorer_kind.is_empty():
 		sprite.frame = 0
@@ -558,26 +563,31 @@ func _load_outfit_art() -> void:
 
 func _load_explorer_art(outfit_id: String) -> void:
 	var kind: String = EXPLORER_KINDS[skin_id]
-	var outfit := "base" if outfit_id.is_empty() else outfit_id.trim_prefix("outfit_")
+	var outfit := outfit_id.trim_prefix("outfit_")
 	if _explorer_kind == kind and _explorer_outfit == outfit:
 		return
-	var folder := "%s/%s/%s" % [EXPLORER_ROOT, kind, outfit]
+	var folder := "%s/%s/base" % [EXPLORER_ROOT, kind]
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("%s/meta.json" % folder))
 	_explorer_meta = parsed as Dictionary
 	_explorer_kind = kind
 	_explorer_outfit = outfit
 	frame_textures.clear()
+	_explorer_masks.clear()
 	anchor_data.clear()
 	for animation in EXPLORER_ANIMS:
 		frame_textures[animation] = load("%s/%s.png" % [folder, animation]) as Texture2D
-	# Only the new base supplies visual_scale; 256px outfit sets keep EXPLORER_SCALE.
+		var mask_path := "%s/%s_mask.png" % [folder, animation]
+		if ResourceLoader.exists(mask_path):
+			_explorer_masks[animation] = load(mask_path) as Texture2D
+	# All outfits share the calibrated Mixamo geometry, grid and anchors.
 	_explorer_scale = float(_explorer_meta.get("visual_scale", EXPLORER_SCALE))
 	var source_scale := float(_explorer_meta.get("source_scale", 1.0))
-	flash_material.set_shader_parameter("outline_source_px", float(_explorer_meta.get("outline_source_px", 4.1)))
+	flash_material.set_shader_parameter("outline_source_px", 0.0)
 	flash_material.set_shader_parameter("shadow_source_offset", Vector2(0.0, 7.0) * source_scale)
 	flash_material.set_shader_parameter("shadow_source_blur", 3.0 * source_scale)
 	sprite.scale = Vector2.ONE * _explorer_scale * gameplay_visual_mult
 	sprite.position = _sprite_base_position()
+	EXPLORER_OUTFITS.configure(flash_material, _explorer_outfit, _explorer_masks.get(frame_name) as Texture2D)
 
 func _explorer_pivot() -> Array:
 	var data: Dictionary = _explorer_meta["anims"][frame_name]
@@ -697,47 +707,7 @@ func _build_visual() -> void:
 	sprite.scale = Vector2.ONE * ART_SCALE
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	flash_material = ShaderMaterial.new()
-	var shader := Shader.new()
-	shader.code = """
-shader_type canvas_item;
-uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
-uniform vec4 flash_color : source_color = vec4(1.0, 0.35, 0.30, 1.0);
-uniform vec4 outline_color : source_color = vec4(0.035, 0.043, 0.071, 1.0);
-uniform float outline_source_px = 4.1;
-uniform vec2 shadow_source_offset = vec2(0.0, 7.0);
-uniform float shadow_source_blur = 3.0;
-uniform vec4 frame_uv_rect = vec4(0.0, 0.0, 1.0, 1.0);
-void fragment() {
-	vec4 pixel = texture(TEXTURE, UV) * COLOR;
-	vec2 step_size = TEXTURE_PIXEL_SIZE * outline_source_px;
-	float outline_alpha = 0.0;
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(step_size.x, 0.0)).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV - vec2(step_size.x, 0.0)).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(0.0, step_size.y)).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV - vec2(0.0, step_size.y)).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + step_size * 0.707).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV - step_size * 0.707).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(step_size.x, -step_size.y) * 0.707).a);
-	outline_alpha = max(outline_alpha, texture(TEXTURE, UV + vec2(-step_size.x, step_size.y) * 0.707).a);
-	vec2 shadow_uv = UV - TEXTURE_PIXEL_SIZE * shadow_source_offset;
-	vec2 blur = TEXTURE_PIXEL_SIZE * shadow_source_blur;
-	vec2 frame_min = frame_uv_rect.xy + TEXTURE_PIXEL_SIZE * 0.5;
-	vec2 frame_max = frame_uv_rect.zw - TEXTURE_PIXEL_SIZE * 0.5;
-	float shadow_alpha = (
-		texture(TEXTURE, clamp(shadow_uv, frame_min, frame_max)).a
-		+ texture(TEXTURE, clamp(shadow_uv + vec2(blur.x, 0.0), frame_min, frame_max)).a
-		+ texture(TEXTURE, clamp(shadow_uv - vec2(blur.x, 0.0), frame_min, frame_max)).a
-		+ texture(TEXTURE, clamp(shadow_uv + vec2(0.0, blur.y), frame_min, frame_max)).a
-		+ texture(TEXTURE, clamp(shadow_uv - vec2(0.0, blur.y), frame_min, frame_max)).a
-	) * 0.056;
-	float border_alpha = max(outline_alpha - pixel.a, 0.0);
-	float backdrop_alpha = max(border_alpha, shadow_alpha * (1.0 - outline_alpha));
-	vec3 backdrop_color = mix(vec3(0.02, 0.025, 0.035), outline_color.rgb, step(shadow_alpha, border_alpha));
-	vec3 flashed_rgb = mix(pixel.rgb, flash_color.rgb, flash_amount);
-	COLOR = vec4(mix(backdrop_color, flashed_rgb, pixel.a), max(pixel.a, backdrop_alpha));
-}
-"""
-	flash_material.shader = shader
+	flash_material.shader = EXPLORER_OUTFITS.SHADER
 	flash_material.set_shader_parameter("flash_color", Color(1.0, 0.35, 0.30))
 	sprite.material = flash_material
 	add_child(sprite)

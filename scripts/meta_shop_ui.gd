@@ -488,10 +488,12 @@ func _character_card(character_id: String, data: Dictionary) -> Control:
 	slot.custom_minimum_size = Vector2(112, 104)
 	var outfit := str(economy.shop.equipped.get("OUTFIT", "")).trim_prefix("outfit_")
 	var kind := str(PlayerVisual.EXPLORER_KINDS.get(character_id, "erkek"))
-	var path := "%s/%s/%s/front.png" % [PlayerVisual.EXPLORER_ROOT, kind, "base" if outfit.is_empty() else outfit]
-	if not ResourceLoader.exists(path):
-		path = "%s/%s/base/front.png" % [PlayerVisual.EXPLORER_ROOT, kind]
+	var path := "%s/%s/base/front.png" % [PlayerVisual.EXPLORER_ROOT, kind]
 	slot.portrait.texture = load(path)
+	if not outfit.is_empty() and PlayerVisual.EXPLORER_KINDS.has(character_id):
+		var mask_path := "%s/%s/base/front_mask.png" % [PlayerVisual.EXPLORER_ROOT, kind]
+		var mask := load(mask_path) as Texture2D if ResourceLoader.exists(mask_path) else null
+		slot.portrait.material = PlayerVisual.EXPLORER_OUTFITS.portrait_material(outfit, mask)
 	body.add_child(slot)
 	var button := Button.new()
 	button.custom_minimum_size.y = 36
