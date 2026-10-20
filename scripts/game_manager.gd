@@ -869,29 +869,6 @@ func _on_prototype_completed() -> void:
 	# Endless runs end only on death; a generated horizon is not a summit.
 	pass
 
-func _commit_run_completion() -> void:
-	pass
-
-func _start_final_cinematic() -> void:
-	final_t = 0.0
-	app_state = AppState.FINAL_CINEMATIC
-	player.set_physics_process(false)
-	spider.set_physics_process(false)
-	beans.set_physics_process(false)
-	rocks.set_physics_process(false)
-	$HUD/IntroSummit.visible = true
-	$HUD/IntroSummit.modulate = Color.WHITE
-	$HUD/IntroText.visible = true
-	$HUD/IntroText.text = "THE TOP OF THE WORLD"
-	var body := player.get_node_or_null("Body") as PlayerVisual
-	if body != null and body.sprite != null:
-		final_character.texture = body.sprite.texture
-	final_character.visible = true
-	final_character.position = Vector2(480.0, 330.0)
-	final_character.rotation = 0.0
-	final_wings.visible = false
-	_update_hud()
-
 func _update_final_cinematic(delta: float) -> void:
 	final_t = minf(final_t + delta, FINAL_CINEMATIC_SECONDS)
 	if final_t < 2.0:
@@ -931,12 +908,6 @@ func _complete_new_run() -> void:
 	if app_state == AppState.GAME_COMPLETE:
 		start_game()
 
-func _start_nightmare_run() -> void:
-	if not bool(save_manager.replay_snapshot().nightmare_unlocked):
-		return
-	mode = MODE_NIGHTMARE
-	start_game()
-
 func _complete_menu() -> void:
 	if app_state == AppState.GAME_COMPLETE:
 		_show_menu()
@@ -959,14 +930,6 @@ func _on_stage_completed(stage_number: int) -> void:
 	double_reward_remaining = 0.0
 	$HUD/RewardToast.text = "+%d GOLD" % reward.gold
 	_reset_stage_ghost(stage_number + 1)
-
-func try_time_wings() -> bool:
-	return false
-
-func _show_time_wings_notice(text: String, seconds: float) -> void:
-	time_wings_notice = text
-	time_wings_notice_remaining = seconds
-	_update_hud()
 
 func try_fire_wings() -> bool:
 	return false
@@ -1632,10 +1595,6 @@ func _reset_stage_ghost(stage_number: int) -> void:
 	ghost_playback = stored.get("samples", []).duplicate(true)
 	if ghost_sprite != null:
 		ghost_sprite.visible = false
-
-func _update_ghost(delta: float) -> void:
-	ghost_sprite.visible = false
-
 
 func show_bean_tutorial() -> void:
 	_queue_hint("bean", "DODGE THE BEANS")
@@ -2714,34 +2673,6 @@ func _add_mute_button() -> void:
 	button.pressed.connect(_toggle_sound_setting)
 	$HUD.add_child(button)
 
-func _add_touch_button(name: String, rect: Rect2, text: String, action: String) -> void:
-	var button := Button.new()
-	button.name = name
-	button.theme = ui_theme
-	button.position = rect.position
-	button.custom_minimum_size = Vector2(64.0, 64.0)
-	button.size = rect.size
-	button.text = text
-	button.add_theme_font_size_override("font_size", 15)
-	button.modulate.a = 0.6
-	button.focus_mode = Control.FOCUS_NONE
-	for state_name in ["normal", "hover", "pressed", "disabled", "focus"]:
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color("20352c") if state_name != "pressed" else Color("41634c")
-		style.set_corner_radius_all(16)
-		button.add_theme_stylebox_override(state_name, style)
-	button.mouse_filter = Control.MOUSE_FILTER_STOP
-	button.visible = DisplayServer.is_touchscreen_available()
-	$HUD.add_child(button)
-	button.gui_input.connect(func(event: InputEvent):
-		if event is InputEventScreenTouch:
-			button.accept_event()
-			if event.pressed:
-				touch_gestures[event.index] = {"origin": event.position, "consumed": true}
-				dispatch_command(action, "mobile")
-		elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			dispatch_command(action, "mobile"))
-
 func _clear_direction_inputs() -> void:
 	Input.action_release("move_left")
 	Input.action_release("move_right")
@@ -2985,13 +2916,6 @@ func _stats_text() -> String:
 	var best_text := "--:--" if personal_best <= 0.0 else "%02d:%02d" % [int(personal_best) / 60, int(personal_best) % 60]
 	return "TIME %02d:%02d\nDEATHS / RETRIES %d / %d\nBEAN / ROCK HITS %d / %d\nCLOSE CALLS %d\nSKILLS USED %d\nBEST SPIDER DISTANCE %.1fm\nPERSONAL BEST %s" % [mm, ss, deaths, stage_restart_count, beans.hit_count, rocks.hit_count, close_calls, skills_used, best_m, best_text]
 
-func _replay_badges_text() -> String:
-	var lines: PackedStringArray = []
-	for challenge in SaveManager.CHALLENGE_NAMES:
-		var state: Dictionary = _challenge_snapshot().get(challenge, {})
-		lines.append("[x] %s" % challenge if bool(state.get("earned", false)) else "[ ] %s" % challenge)
-	return "\n".join(lines)
-
 func _publish_readonly_web_state() -> void:
 	if not OS.has_feature("web") or not _debug_state_enabled():
 		return
@@ -3003,7 +2927,7 @@ func _publish_readonly_web_state() -> void:
 
 func _debug_state_enabled() -> bool:
 	if OS.has_feature("web"):
-		return "debug" in str(JavaScriptBridge.eval("window.location.hash", true)).to_lower()
+		return OS.has_feature("qa_debug") and "debug" in str(JavaScriptBridge.eval("window.location.hash", true)).to_lower()
 	return OS.is_debug_build()
 
 func _challenge_snapshot() -> Dictionary:
@@ -3130,6 +3054,8 @@ func _readonly_state_snapshot() -> Dictionary:
 
 func _apply_debug_meta_overrides() -> void:
 	if not OS.has_feature("web"):
+		return
+	if not OS.has_feature("qa_debug"):
 		return
 	var hash := str(JavaScriptBridge.eval("window.location.hash", true))
 	if "debug" not in hash.to_lower():
