@@ -11,7 +11,7 @@ const FRAMES := [
 	preload("res://assets/art/gpt/spider/idle.png"),
 ]
 
-# Double the original drawing; Body resets/intro scaling and collision stay independent.
+# Double the original drawing; Body resets and collision stay independent.
 # At far_gap the native upper leg tips cross the bottom edge; the body stays below it.
 const VISUAL_SCALE := 2.0
 const BASE_POSITION := Vector2(0, -8)

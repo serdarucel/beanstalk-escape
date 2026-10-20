@@ -50,7 +50,7 @@ func _physics_process(delta: float) -> void:
 func reset_run(at_position: Vector2) -> void:
 	# The player has already teleported here. Retain the last relative gap,
 	# including any in-flight transition, instead of using a stage-start gap.
-	_preserved_reset = _gap_following and game != null and not game.intro_active and not game.tutorial_active and game.total_time > 0.0 and game.app_state in [GameManager.AppState.PLAYING, GameManager.AppState.PLAYER_DEAD]
+	_preserved_reset = _gap_following and game != null and not game.tutorial_active and game.total_time > 0.0 and game.app_state in [GameManager.AppState.PLAYING, GameManager.AppState.PLAYER_DEAD]
 	if not _preserved_reset:
 		_danger_tracking = false
 		_gap_following = false

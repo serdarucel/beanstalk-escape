@@ -35,7 +35,7 @@ func _run() -> void:
 	_check(sanitized.meta_systems.settings == {"sound": false, "ghost": false} and sanitized.meta.gold == 321, "legacy effects fields ignored; saved settings and gold retained")
 	var game := (load("res://scenes/main.tscn") as PackedScene).instantiate() as GameManager
 	root.add_child(game)
-	game._finish_intro()
+	_check(game.app_state == GameManager.AppState.PLAYING, "startup enters playing immediately")
 	game._finish_onboarding()
 	game.shake_remaining = 0.20
 	game._apply_impact_fx(0.0)
@@ -54,7 +54,7 @@ func _run() -> void:
 		await _click(menu)
 		_check(game.app_state == GameManager.AppState.MENU, "%s menu mouse click" % viewport_size)
 		game.get_node("HUD/NewRun").pressed.emit()
-		game._finish_intro()
+		_check(game.app_state == GameManager.AppState.PLAYING, "%s new run enters playing immediately" % viewport_size)
 		game._finish_onboarding()
 		game._enter_player_dead(GameManager.DeathCause.CAUGHT)
 		await process_frame
@@ -63,7 +63,7 @@ func _run() -> void:
 		var death_x := maxf((viewport_size.x - death_width * 2.0 - 10.0) * 0.5, 8.0)
 		_check(death_menu.visible and death_menu.position.is_equal_approx(Vector2(death_x + death_width + 10.0, viewport_size.y * 0.40 + 58.0)) and death_menu.size == Vector2(death_width, 52.0), "%s death layout unchanged" % viewport_size)
 		game.get_node("HUD/NewRun").pressed.emit()
-		game._finish_intro()
+		_check(game.app_state == GameManager.AppState.PLAYING, "%s next run enters playing immediately" % viewport_size)
 		game._finish_onboarding()
 	game.queue_free()
 	await process_frame

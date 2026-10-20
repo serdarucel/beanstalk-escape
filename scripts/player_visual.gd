@@ -156,7 +156,7 @@ func _update_mode(player: PlayerController, delta: float) -> void:
 	if _is_explorer():
 		_update_explorer_mode(player, app_state, delta)
 		return
-	if app_state in [GameManager.AppState.MENU, GameManager.AppState.INTRO, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]:
+	if app_state in [GameManager.AppState.MENU, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]:
 		_set_mode("menu", "hang")
 	elif app_state == GameManager.AppState.PLAYER_DEAD:
 		if mode != "death":
@@ -198,7 +198,7 @@ func _sprite_base_position() -> Vector2:
 	return Vector2(0.0, EXPLORER_FOOT_Y if _is_explorer() else BASE_Y)
 
 func _update_explorer_mode(player: PlayerController, app_state: int, delta: float) -> void:
-	var menu_states := [GameManager.AppState.MENU, GameManager.AppState.INTRO, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]
+	var menu_states := [GameManager.AppState.MENU, GameManager.AppState.SHOP, GameManager.AppState.CHARACTER_SELECT, GameManager.AppState.MAP, GameManager.AppState.CREDITS]
 	if app_state == GameManager.AppState.PLAYING and (_explorer_previous_app_state == -1 or _explorer_previous_app_state == GameManager.AppState.PLAYER_DEAD or _explorer_previous_app_state in menu_states):
 		_explorer_respawning = true
 		_explorer_anim_time = 0.0

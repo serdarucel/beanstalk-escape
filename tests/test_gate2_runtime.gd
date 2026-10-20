@@ -123,8 +123,7 @@ func test_bean_timeline() -> void:
 
 func test_time_wings_command_and_clock() -> void:
 	var game := await make_game()
-	if game.intro_active:
-		game._finish_intro()
+	check(game.app_state == GameManager.AppState.PLAYING, "DIRECT-PLAY", "start_game enters PLAYING immediately")
 	game.tutorial_active = false
 	game._update_hud()
 	game.player.set_physics_process(false)

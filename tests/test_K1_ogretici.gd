@@ -133,7 +133,7 @@ func run_window(window_size: Vector2i) -> void:
 	game.save_manager = SaveManager.new("user://qa/k1_%d.json" % Time.get_ticks_usec())
 	root.add_child(game)
 	await process_frame
-	game._finish_intro()
+	assert(game.app_state == GameManager.AppState.PLAYING, "startup must enter PLAYING immediately")
 	game.layout_hud_for_viewport(game.get_viewport_rect().size)
 	var seen := {}
 	var last_step := 0

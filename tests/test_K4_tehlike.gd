@@ -58,7 +58,7 @@ func _run() -> void:
 		game.save_manager = SaveManager.new("user://qa/k4_profile.json")
 		root.add_child(game)
 		await process_frame
-		game._finish_intro()
+		check("startup directly PLAYING", game.app_state == GameManager.AppState.PLAYING)
 		game._finish_onboarding()
 		game._apply_window_aspect(size)
 		# Isolate the real danger lifecycle from unrelated obstacle collisions.

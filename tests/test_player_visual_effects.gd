@@ -89,7 +89,7 @@ func _run() -> void:
 	print("Spider climb silhouette: source=%d, height=%.3f px" % [spider_image.get_used_rect().size.y, spider_height])
 	_check(absf(spider_height - 234.0) < 0.01, "spider height is original x2")
 	spider_visual.scale = Vector2.ONE
-	_check(is_equal_approx(spider_sprite.scale.y, 2.0), "intro Body reset preserves spider size")
+	_check(is_equal_approx(spider_sprite.scale.y, 2.0), "run Body reset preserves spider size")
 	spider_visual.free()
 	game.free()
 	print("PASS: %d, FAIL: %d, SKIP: 0" % [passed, failed])

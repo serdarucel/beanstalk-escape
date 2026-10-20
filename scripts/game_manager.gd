@@ -159,7 +159,7 @@ class HeartIcon extends Control:
 		]), color)
 
 enum State { PLAYING, PLAYER_DEAD, PROTOTYPE_COMPLETE }
-enum AppState { MENU, INTRO, PLAYING, PAUSED, PLAYER_DEAD, FINAL_CINEMATIC, GAME_COMPLETE, SHOP, CHARACTER_SELECT, MAP, CREDITS, RESUMING }
+enum AppState { MENU, PLAYING, PAUSED, PLAYER_DEAD, FINAL_CINEMATIC, GAME_COMPLETE, SHOP, CHARACTER_SELECT, MAP, CREDITS, RESUMING }
 enum DeathCause { NONE, FALL, CAUGHT, OBSTACLE }
 var state := State.PLAYING
 var app_state := AppState.MENU
@@ -276,15 +276,8 @@ var damage_events := 0
 var spider_red_zone_seen := false
 var completed_stages := {}
 var completion_committed := false
-const INTRO_BEAT_SECONDS := [2.3, 3.0, 2.3]
 const CAMERA_PLAYER_HEIGHT_RATIO := 0.75
 var camera_play_position := Vector2.ZERO
-const INTRO_LOOK_UP_POSITION := Vector2(0.0, -210.0)
-const INTRO_GUARDIAN_SCALE := Vector2.ONE * 1.35
-const INTRO_VISUAL_MODES := ["climb", "summit", "guardian"]
-var intro_active := false
-var intro_beat := 0
-var intro_t := 0.0
 var debug_start_stage := 1
 var debug_sandbox := ""
 var meta_ui: MetaShopUI
@@ -465,11 +458,6 @@ func _physics_process(delta: float) -> void:
 			confirm_pending = false
 			restart_stage()
 			return
-	if app_state == AppState.INTRO:
-		_update_intro(delta)
-		_update_hud()
-		_publish_readonly_web_state()
-		return
 	if app_state == AppState.FINAL_CINEMATIC:
 		_update_final_cinematic(delta)
 		_update_hud()
@@ -567,10 +555,7 @@ func _visible_death_actions() -> Array[Button]:
 	return visible_actions
 
 func _unhandled_input(event: InputEvent) -> void:
-	if app_state == AppState.INTRO and _is_intro_skip_event(event):
-		_finish_intro()
-		return
-	if app_state == AppState.FINAL_CINEMATIC and _is_intro_skip_event(event):
+	if app_state == AppState.FINAL_CINEMATIC and _is_final_cinematic_skip_event(event):
 		_finish_final_cinematic()
 		return
 	if event is InputEventKey and event.pressed and not event.echo and _debug_state_enabled():
@@ -629,9 +614,6 @@ func _debug_evidence_stage(stage_number: int) -> void:
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if not event.pressed:
 		touch_gestures.erase(event.index)
-		return
-	if event.pressed and app_state == AppState.INTRO:
-		_finish_intro()
 		return
 	if event.pressed and app_state != AppState.PLAYING:
 		_request_confirm()
@@ -779,87 +761,9 @@ func start_game() -> void:
 	audio.play_sfx("ui_click")
 	(player.get_node("Body") as PlayerVisual).set_skin(str(economy.shop.selected_character))
 	restart()
-	_begin_intro()
+	_start_run()
 
-func _begin_intro() -> void:
-	intro_active = true
-	intro_beat = 0
-	intro_t = 0.0
-	app_state = AppState.INTRO
-	player.set_physics_process(false)
-	spider.set_physics_process(false)
-	beans.set_physics_process(false)
-	golds.visible = false
-	var camera := player.get_node_or_null("Camera2D") as Camera2D
-	if camera != null:
-		_set_camera_position(camera, camera_play_position)
-		camera.offset = Vector2.ZERO
-	var spider_body := spider.get_node_or_null("Body") as CanvasItem
-	if spider_body != null:
-		spider_body.visible = false
-		spider_body.scale = Vector2.ONE
-	$HUD/IntroSummit.visible = false
-	_update_intro_presentation()
-	_update_hud()
-
-func _update_intro(delta: float) -> void:
-	intro_t += delta
-	var duration: float = INTRO_BEAT_SECONDS[intro_beat]
-	var progress := clampf(intro_t / duration, 0.0, 1.0)
-	var camera := player.get_node_or_null("Camera2D") as Camera2D
-	if camera != null:
-		if intro_beat == 0:
-			_set_camera_position(camera, camera_play_position.lerp(INTRO_LOOK_UP_POSITION, progress * progress * (3.0 - 2.0 * progress)))
-		elif intro_beat == 2:
-			_set_camera_position(camera, camera_play_position)
-			if intro_t < 0.34:
-				var shake_strength := 9.0 * (1.0 - intro_t / 0.34)
-				camera.offset = Vector2.from_angle(intro_t * TAU * 18.0) * shake_strength
-			else:
-				camera.offset = Vector2.ZERO
-	$HUD/IntroSummit.modulate.a = clampf(progress * 4.0, 0.0, 1.0) if intro_beat == 1 else 1.0
-	var spider_body := spider.get_node_or_null("Body") as CanvasItem
-	if spider_body != null and intro_beat == 2:
-		spider_body.visible = true
-		spider_body.position = Vector2.ZERO
-		_layout_intro_text(get_viewport_rect().size)
-	if intro_t < duration:
-		return
-	intro_t = 0.0
-	intro_beat += 1
-	if intro_beat >= INTRO_BEAT_SECONDS.size():
-		_finish_intro()
-		return
-	_update_intro_presentation()
-
-func _update_intro_presentation() -> void:
-	var messages := [
-		"THE TOP OF THE BEANSTALK IS\nTHE TOP OF THE WORLD.",
-		"WE CLIMB IT TO JUMP FROM\nTHE HIGHEST POINT ON EARTH.",
-		"BUT THE GUARDIAN\nWILL TRY TO STOP US.",
-	]
-	$HUD/IntroText.text = messages[intro_beat]
-	_layout_intro_text(get_viewport_rect().size)
-	$HUD/IntroSummit.visible = intro_beat == 1
-	$HUD/IntroSummit.modulate = Color.WHITE
-	var spider_body := spider.get_node_or_null("Body") as CanvasItem
-	if spider_body != null:
-		spider_body.visible = intro_beat == 2
-		spider_body.scale = INTRO_GUARDIAN_SCALE if intro_beat == 2 else Vector2.ONE
-	if intro_beat == 2:
-		var camera := player.get_node_or_null("Camera2D") as Camera2D
-		if camera != null:
-			_set_camera_position(camera, camera_play_position)
-		_layout_intro_text(get_viewport_rect().size)
-		audio.play_sfx("spider_scream")
-
-func _finish_intro() -> void:
-	if not intro_active:
-		return
-	intro_active = false
-	intro_beat = 0
-	intro_t = 0.0
-	# Rebuild the exact normal run start so watching and skipping are identical.
+func _start_run() -> void:
 	player.reset_run(Vector2.ZERO)
 	action_hazards.reset_run()
 	powerups.sync_after_player_teleport()
@@ -902,7 +806,7 @@ func _finish_intro() -> void:
 	_update_hud()
 	_publish_readonly_web_state()
 
-func _is_intro_skip_event(event: InputEvent) -> bool:
+func _is_final_cinematic_skip_event(event: InputEvent) -> bool:
 	if event is InputEventKey:
 		return event.pressed and not event.echo and (event.physical_keycode == KEY_ENTER or event.physical_keycode == KEY_KP_ENTER or event.physical_keycode == KEY_SPACE)
 	if event is InputEventMouseButton:
@@ -1292,8 +1196,6 @@ func _request_confirm() -> void:
 			focused.pressed.emit()
 		else:
 			_start_selected_run()
-	elif app_state == AppState.INTRO:
-		_finish_intro()
 	elif app_state == AppState.PLAYER_DEAD:
 		var focused := get_viewport().gui_get_focus_owner() as Button
 		if focused != null and focused.visible and not focused.disabled:
@@ -1523,7 +1425,7 @@ func _restart_run_from_death() -> void:
 				ended_runs_since_interstitial = 0
 				last_interstitial_msec = now
 		restart()
-		_begin_intro()
+		_start_run()
 
 func _restart_from_death() -> void:
 	if app_state != AppState.PLAYER_DEAD:
@@ -2314,11 +2216,7 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	camera_play_position = Vector2(0.0, viewport_size.y * 0.5 - player_screen_y)
 	var camera := player.get_node_or_null("Camera2D") as Camera2D
 	if camera != null:
-		if intro_active and intro_beat == 0:
-			var progress := clampf(intro_t / float(INTRO_BEAT_SECONDS[0]), 0.0, 1.0)
-			_set_camera_position(camera, camera_play_position.lerp(INTRO_LOOK_UP_POSITION, smoothstep(0.0, 1.0, progress)))
-		elif not intro_active or intro_beat == 2:
-			_set_camera_position(camera, camera_play_position)
+		_set_camera_position(camera, camera_play_position)
 	var width := maxf(viewport_size.x, 320.0)
 	var height := maxf(viewport_size.y, 320.0)
 	var portrait := width < height
@@ -2509,7 +2407,7 @@ func layout_hud_for_viewport(viewport_size: Vector2) -> void:
 	$HUD/ResultPanel.position = Vector2(result_margin, result_top)
 	$HUD/ResultPanel.size = Vector2(width - result_margin * 2.0, result_bottom - result_top)
 	_layout_centered_label($HUD/Complete, width, 24.0 if compact else 34.0, 32.0 if compact else 40.0, result_margin + 12.0)
-	_layout_intro_text(Vector2(width, height))
+	_layout_centered_label($HUD/IntroText, width, height * 0.34, 110.0, 72.0)
 	var content_x := result_margin + 18.0
 	var content_top := 68.0 if compact else 88.0
 	var content_gap := 24.0 if compact else 28.0
@@ -2575,7 +2473,7 @@ func score_multiplier() -> int:
 	return 2 if powerups.is_active("DOUBLE") else 1
 
 func _layout_powerup_rows(x: float, top: float, width: float, font_size: int) -> float:
-	var playing := app_state == AppState.PLAYING and not intro_active
+	var playing := app_state == AppState.PLAYING
 	for id: String in powerup_hud_rows:
 		(powerup_hud_rows[id] as Label).visible = playing and powerups.is_active(id)
 	for id: String in powerups.active:
@@ -2669,44 +2567,6 @@ func _layout_centered_label(label: Label, width: float, y: float, height: float,
 	label.position = Vector2(side_margin, y)
 	label.size = Vector2(maxf(width - side_margin * 2.0, 1.0), height)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
-func _layout_intro_text(viewport_size: Vector2) -> void:
-	var guardian_beat := intro_active and intro_beat == 2
-	var panel_y := 12.0 if guardian_beat else viewport_size.y * 0.34
-	var panel_height := 96.0 if guardian_beat else 110.0
-	_layout_centered_label($HUD/IntroText, viewport_size.x, panel_y, panel_height, 72.0)
-	if guardian_beat:
-		_layout_intro_guardian(viewport_size)
-
-func _layout_intro_guardian(viewport_size: Vector2) -> void:
-	var body := spider.get_node("Body") as Node2D
-	var guardian := body.get("sprite") as Sprite2D
-	if guardian == null or guardian.texture == null:
-		return
-	# Frame the real player sprite directly below the wrapped text panel.
-	# Only the intro camera moves; _finish_intro restores the normal run view.
-	var panel := $HUD/IntroText as Label
-	var camera := player.get_node("Camera2D") as Camera2D
-	var player_sprite := (player.get_node("Body") as PlayerVisual).sprite
-	camera.global_position.x = 0.0
-	camera.force_update_scroll()
-	var player_bounds := player_sprite.get_global_transform_with_canvas() * player_sprite.get_rect()
-	var player_top := panel.get_global_rect().end.y + 16.0
-	var canvas := get_viewport().get_canvas_transform()
-	camera.global_position += canvas.affine_inverse().basis_xform(Vector2(0.0, player_bounds.position.y - player_top))
-	camera.global_position.x = 0.0
-	camera.force_update_scroll()
-	player_bounds = player_sprite.get_global_transform_with_canvas() * player_sprite.get_rect()
-	var top := player_bounds.end.y + 24.0
-	var available := Vector2(maxf(viewport_size.x - 32.0, 1.0), maxf(viewport_size.y - top - 16.0, 1.0))
-	canvas = get_viewport().get_canvas_transform()
-	var local_bounds: Rect2 = guardian.transform * guardian.get_rect().grow(16.0)
-	var bounds: Rect2 = Transform2D(canvas.x, canvas.y, Vector2.ZERO) * local_bounds
-	var fit := minf(INTRO_GUARDIAN_SCALE.x, minf(available.x / bounds.size.x, available.y / bounds.size.y))
-	body.scale = Vector2.ONE * fit
-	body.position = Vector2.ZERO
-	var center := Vector2(viewport_size.x * 0.5, top + available.y * 0.5)
-	spider.global_position = canvas.affine_inverse() * center - local_bounds.get_center() * fit
 
 func fly_gold_to_counter(screen_transform: Transform2D, arrived: Callable) -> void:
 	var collected_value := 1
@@ -2984,7 +2844,7 @@ func _update_hud() -> void:
 	$HUD/TutorialSkip.visible = playing and tutorial_active
 	$HUD/Mute.visible = playing
 	$HUD/RunPause.visible = playing
-	$HUD/IntroText.visible = app_state in [AppState.INTRO, AppState.FINAL_CINEMATIC]
+	$HUD/IntroText.visible = app_state == AppState.FINAL_CINEMATIC
 	$HUD/Gauge.visible = false
 	$HUD/MiniMap.visible = false
 	$HUD/StageBanner.visible = false
@@ -3222,7 +3082,6 @@ func _readonly_state_snapshot() -> Dictionary:
 		"mode": mode,
 		"nightmare_unlocked": bool(save_manager.replay_snapshot().nightmare_unlocked),
 		"challenges": _challenge_snapshot(),
-		"intro": {"active": intro_active, "beat": intro_beat, "t": intro_t, "visual_mode": INTRO_VISUAL_MODES[intro_beat] if intro_active else "none"},
 		"tutorial": {"active": tutorial_active, "step": tutorial_step, "completed": bool(save_manager.meta_systems_snapshot().tutorial_completed)},
 		"ghost": {"enabled": bool(meta_settings.ghost), "visible": ghost_sprite != null and ghost_sprite.visible, "stage_best_time": ghost_best_time},
 		"final": {"active": app_state == AppState.FINAL_CINEMATIC, "t": final_t, "duration": FINAL_CINEMATIC_SECONDS},

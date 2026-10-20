@@ -46,10 +46,11 @@ func _run() -> void:
 	game._physics_process(0.0)
 	_check(is_equal_approx(game.score, before), "tutorial climb earns no score")
 	game.tutorial_active = false
-	game.app_state = GameManager.AppState.INTRO
+	game._start_final_cinematic()
 	game.player.position.y -= 100.0
 	game._physics_process(0.0)
-	_check(is_equal_approx(game.score, before), "story climb earns no score")
+	_check(is_equal_approx(game.score, before), "final cinematic climb earns no score")
+	game._finish_final_cinematic()
 	game.app_state = GameManager.AppState.PLAYING
 	game.golds.reset_combo()
 	var coins: Array[Node] = game.golds.get_children()

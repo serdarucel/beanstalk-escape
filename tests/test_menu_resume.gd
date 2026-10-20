@@ -71,7 +71,7 @@ func _run() -> void:
 		else:
 			game.get_node("HUD/NewRun").pressed.emit()
 		_check(not game.resume_available and not resume.visible and game.mode == run_mode, "new run clears resume")
-		game._finish_intro()
+		_check(game.app_state == GameManager.AppState.PLAYING, "new run enters playing immediately")
 		game._finish_onboarding()
 		game._enter_player_dead(GameManager.DeathCause.CAUGHT)
 		game.get_node("HUD/DeathMenu").pressed.emit()
