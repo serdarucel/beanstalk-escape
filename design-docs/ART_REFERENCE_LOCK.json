@@ -5,23 +5,6 @@
   "accepted_by": "ana oturum 11.10.2026 21:35, kanıt 03-test/kontrol-20261011-0adea19/",
   "reason": "Ana oturum pilot kabulü: regresyon 130/0/0, beyaz kutu 0, tek bileşen 300/300, boy 102-107, gövde 40, üç atmosferde kontrast >=97%, temas <=2 px ve iki kanat sırtta doğrulandı.",
   "source": "Codex built-in image_gen, 11.10.2026",
-  "rig_contract": {
-    "scene": "res://scenes/character_rig.tscn",
-    "script": "res://scripts/character_rig.gd",
-    "visible_size": [44, 108],
-    "collider_size": [30, 86],
-    "atlas_size": [1254, 1254],
-    "grid": [6, 4],
-    "cell_size": [209, 313.5],
-    "part_local_pivot": [0, 0],
-    "parts": [
-      "head_neutral", "head_hurt", "hair_back", "hair_front", "torso", "pelvis",
-      "upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r", "hand_l_open", "hand_r_open",
-      "hand_l_grip", "hand_r_grip", "thigh_l", "thigh_r", "shin_l", "shin_r",
-      "foot_l", "foot_r", "accessory", "wing_anchor"
-    ],
-    "animations": ["idle", "climb_loop", "branch_takeoff", "branch_midair", "branch_landing", "hurt", "skill_time"]
-  },
   "flipbook_override": {
     "date": "2026-10-12",
     "authority": "owner override: single-piece full-body frames replace the shared multi-part rig",
@@ -95,26 +78,6 @@
     ]
   },
   "files": [
-    {
-      "skin": "M1",
-      "path": "res://assets/art/character_rig/skins/m1/parts_sheet.png",
-      "evidence_path": "../03-test/qa/art-reference/pilot/m1-parts-sheet.png",
-      "sha256": "76ee092135e28819221eacea69eaab1f7fcd2814e772feb5650f5d23d99d5411",
-      "source": "Codex image_gen, 11.10.2026, yönetici kararı 10.10.2026",
-      "dimensions": [1254, 1254],
-      "alpha_result": "PASS: Format32bppArgb; 98,596 sampled pixels: 75.85% alpha=0, 24.05% partial alpha, 0.10% alpha=255; all outer corners alpha=0; per-cell detached components removed",
-      "control_result": "PASS measured: 150/150 rig-only samples are one 8-connected component at alpha>127; opaque white rectangle/pixels 0; idle 105-106 px and climb 104-107 px head-to-foot; body width 40 px; minimum contrast-boundary pass ratios sunny 97.99%, twilight 97.86%, storm 96.17%; contact gap maximum 1.9 px"
-    },
-    {
-      "skin": "F1",
-      "path": "res://assets/art/character_rig/skins/f1/parts_sheet.png",
-      "evidence_path": "../03-test/qa/art-reference/pilot/f1-parts-sheet.png",
-      "sha256": "42a4ab4e869729af34fcce395b5ee641603dea5b316bb85a532d329543205957",
-      "source": "Codex image_gen, 11.10.2026, yönetici kararı 10.10.2026",
-      "dimensions": [1254, 1254],
-      "alpha_result": "PASS: Format32bppArgb; 98,596 sampled pixels: 73.03% alpha=0, 26.82% partial alpha, 0.14% alpha=255; all outer corners alpha=0; per-cell detached components removed",
-      "control_result": "PASS measured: 150/150 rig-only samples are one 8-connected component at alpha>127; opaque white rectangle/pixels 0; idle 106-107 px and climb 105-108 px head-to-foot; body width 40 px; minimum contrast-boundary pass ratios sunny 97.81%, twilight 96.59%, storm 94.54%; contact gap maximum 1.8 px"
-    },
     {
       "skin": "SHARED",
       "path": "res://assets/art/character_rig/wing/time_wings.png",

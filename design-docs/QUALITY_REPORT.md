@@ -11,7 +11,7 @@
 | VIS12 seam | PASS measured | 26 consecutive trunk/branch scroll frames, 0 support-mask sky pixels in every frame; six stage frames also total 0 support-mask sky pixels. |
 | §5.1 scale | PASS | Trunk 180; branches 42–51 measured (44 nominal); texture ≤54; grip detail 12; leaf 140; outline 3–4; all within v1.3 ranges. |
 | Windowed tests | PASS | `capture_gate3a_world.gd`: 6 stage frames + 26 seam frames; `test_gate_a_visual.gd` GA08: 5 PASS / 0 FAIL. |
-| Targeted headless regression | PASS | `test_gate3a_rig.gd` 8/0; `test_scale_lock.gd` 15/0 plus 2 expected headless-frame NOT RUN; `test_gate_a.gd` 9/0 earlier in the same correction turn before the final render-only blend adjustment. |
+| Targeted headless regression | PASS | retired rig test (removed 2026-10-20) 8/0; `test_scale_lock.gd` 15/0 plus 2 expected headless-frame NOT RUN; `test_gate_a.gd` 9/0 earlier in the same correction turn before the final render-only blend adjustment. |
 | Full 16-file regression | NOT RUN | Main session owns the requested full parallel regression. No assertion changed in this round. |
 
 No production PNG asset was created or modified; only rendering code and regenerated QA screenshots changed. `ART_REFERENCE_LOCK.json`, the M1/F1 pilot, `master`, and `02-kod/docs` were untouched.
@@ -35,7 +35,7 @@ Pilot visual findings are closed, but reference status remains gated by the inco
 
 | Item ID | Status | Evidence / open work |
 |---|---|---|
-| §12.1-2 / §11 shared rig | PASS automated | `CharacterRig` has 22 named parts/states, one hierarchy/pivot grid, shared 44×108 contract, unchanged 30×86 collider and seven pilot animations. `test_gate3a_rig.gd` 8/0. |
+| §12.1-2 / §11 shared rig | PASS automated | the retired multipart rig has 22 named parts/states, one hierarchy/pivot grid, shared 44×108 contract, unchanged 30×86 collider and seven pilot animations. retired rig test (removed 2026-10-20) 8/0. |
 | F1 owner identity | PASS source / HUMAN REVIEW REQUIRED render | F1 sheet was generated from both approved source images; red ponytail + turquoise tunic are present in the generated sheet. Rendered gameplay identity inspection is open. |
 | RGBA / no opaque rectangle | PASS automated | Both 1254×1254 sheets are ARGB, >70% sampled alpha=0, all outer corners alpha=0; active main scene no longer executes the `#152238` greybox rectangle. |
 | §5.1-character | NOT RUN rendered | Numeric contract remains 15/15; Stage 1/3/storm pilot-art screenshots were not captured or inspected. |
@@ -218,7 +218,7 @@ Targeted Godot results: `tests/test_gate2_fairness.gd` 8 PASS / 0 FAIL; `tests/t
 | §5.1 scale | PASS (targeted) | Texture element `54`, grip detail `12`, max leaf `140`, outline `3`; `test_scale_lock.gd` 15 PASS / 0 FAIL / 2 headless frame NOT RUN. |
 | VIS12 capture | PASS (render) | Windowed 960×540 capture emitted 6/6 stage frames and 26/26 seam frames; every recorded support mask has sky leak `0`. |
 | GA08 | PASS (render) | Windowed isolated run 5 PASS / 0 FAIL; unmodified green/lime and live-support assertions. |
-| Targeted regression | PASS | `test_gate3a_rig.gd` 8/0; `test_scale_lock.gd` 15/0 plus 2 frame NOT RUN; `test_gate_a.gd` 9/0. Complete 16-file regression NOT RUN this checkpoint. |
+| Targeted regression | PASS | retired rig test (removed 2026-10-20) 8/0; `test_scale_lock.gd` 15/0 plus 2 frame NOT RUN; `test_gate_a.gd` 9/0. Complete 16-file regression NOT RUN this checkpoint. |
 
 No assertion changed. Evidence: `../03-test/qa/world/stage-1-960x540.png` and `stage-3-split-960x540.png`. Image source: Codex built-in imagegen, 2026-10-12, owner decision 2026-10-10.
 
@@ -231,7 +231,7 @@ No assertion changed. Evidence: `../03-test/qa/world/stage-1-960x540.png` and `s
 | VIS12 / FAIL F | CODEX PASS; owner visual verification pending | Split inner contours begin only after an actual sky gap exceeds `8 px`; the first three 12 px branch-outline segments are omitted where branches join the split. Fill/collider geometry is unchanged. Exact-outline-like pixels deeper than 4 px inside the split support crop fell from `1540` to `788`; branch join and gap contours no longer overlap the unified face. |
 | VIS12 capture | PASS (render) | Final windowed 960×540 capture emitted 6/6 stage frames and 26/26 seam frames; every recorded support mask has sky leak `0`. |
 | GA08 | PASS (render) | Final windowed isolated run 5 PASS / 0 FAIL; assertions unchanged. |
-| Targeted regression | PASS | `test_gate3a_rig.gd` 8/0; `test_scale_lock.gd` 15/0 plus 2 headless frame NOT RUN; `test_gate_a.gd` 9/0. Complete 17-file regression NOT RUN this checkpoint. |
+| Targeted regression | PASS | retired rig test (removed 2026-10-20) 8/0; `test_scale_lock.gd` 15/0 plus 2 headless frame NOT RUN; `test_gate_a.gd` 9/0. Complete 17-file regression NOT RUN this checkpoint. |
 
 No assertion changed and no PNG asset changed. Evidence: `../03-test/qa/world/stage-{1,3-split,4,5}-960x540.png` plus matching `world-only` and `support-mask` frames.
 
@@ -246,7 +246,7 @@ No assertion changed and no PNG asset changed. Evidence: `../03-test/qa/world/st
 | §12 / FAIL E | PRESERVED | Transfer tangent UV and branch-over-bridge-foot order are unchanged. |
 | VIS12 capture | PASS (render) | Final windowed 960×540 capture emitted 6/6 stage frames and 26/26 seam frames; support-mask sky leak remains `0`. |
 | GA08 | PASS (render) | Final isolated windowed run 5 PASS / 0 FAIL; assertions unchanged. |
-| Targeted regression | PASS | `test_gate3a_rig.gd` 8/0; `test_scale_lock.gd` 15/0 plus 2 headless frame NOT RUN; `test_gate_a.gd` 9/0. Complete 17-file regression NOT RUN. |
+| Targeted regression | PASS | retired rig test (removed 2026-10-20) 8/0; `test_scale_lock.gd` 15/0 plus 2 headless frame NOT RUN; `test_gate_a.gd` 9/0. Complete 17-file regression NOT RUN. |
 
 No assertion or PNG asset changed. Before evidence: `../03-test/kontrol-20261012-11200b8/world/zoom-karakter-kontrast.png` and `zoom-split-catal.png`. After evidence: `../03-test/qa/world/stage-{1,3-split,4,5}-960x540.png`, matching `world-only` frames, and `../03-test/qa/art-reference/pilot/contrast/`.
 

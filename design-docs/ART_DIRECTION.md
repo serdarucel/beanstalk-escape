@@ -13,7 +13,7 @@
 
 - `§12.1-2` PARTIAL PASS: M1 and owner-approved F1 identities were produced only with built-in `image_gen` as transparent rigid-part sheets. No CLI/API-key/paid fallback was used.
 - `§11-F1` PASS (source/contract): F1 uses the approved red ponytail and turquoise tunic identity. The generic green-cream F1 clothing line remains overridden by D-002.
-- `§11-rig` PASS (automated): one `CharacterRig` hierarchy, one zero-local-pivot grid, one 44×108 visible contract, one 30×86 collider and seven pilot animations serve M1/F1 without animation mutation.
+- `§11-rig` PASS (automated): one retired multipart rig (removed 2026-10-20) hierarchy, one zero-local-pivot grid, one 44×108 visible contract, one 30×86 collider and seven pilot animations serve M1/F1 without animation mutation.
 - `§12.1-3` NOT RUN visually: automated RGBA/atlas checks pass, but zero visible joint gap, ≤2 px hand/foot contact, ≤2 px wing seam, clipping and anatomy require rendered-frame inspection.
 - `§12.1-4` NOT RUN: sunny/storm silhouette-boundary contrast and grayscale hazard distinction have no rendered evidence.
 - `§12.1-5` NOT RUN: 30 FPS key/intermediate frame sequences and MP4 inspection were not executed.

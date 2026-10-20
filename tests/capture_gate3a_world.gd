@@ -14,7 +14,7 @@ const STAGE_SAMPLES := [
 
 var game: GameManager
 var world: Node2D
-var rig: CharacterRig
+var rig: PlayerVisual
 var document := {
 	"generated_by": "res://tests/capture_gate3a_world.gd",
 	"resolution": [960, 540],
@@ -35,9 +35,9 @@ func _initialize() -> void:
 	game.start_game()
 	await process_frame
 	world = game.get_node("World") as Node2D
-	rig = game.player.body as CharacterRig
+	rig = game.player.body as PlayerVisual
 	rig.set_skin("M1")
-	rig.seek_animation("climb_loop", 0.20)
+	rig._set_frame("climb")
 	document["visual_contract"] = world.qa_visual_contract()
 	for sample: Dictionary in STAGE_SAMPLES:
 		await _capture_stage(sample)
@@ -133,7 +133,7 @@ func _place_player(position: Vector2) -> void:
 	game.spider.set_physics_process(false)
 	game.beans.set_physics_process(false)
 	game.player._sync_stage_mode()
-	rig.seek_animation("climb_loop", 0.20)
+	rig._set_frame("climb")
 	game.stages.stage_banner_remaining = 0.0
 	game.tutorial_remaining = 0.0
 	game._update_hud()
