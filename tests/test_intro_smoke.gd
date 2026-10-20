@@ -55,7 +55,8 @@ func _run() -> void:
 	_check(game.run_generation == generation + 1 and replay_snapshot == start_snapshot, "PLAY-AGAIN-EQUIVALENCE", "same fresh run as Play")
 	game.save_manager.profile.replay.nightmare_unlocked = true
 	game._show_menu()
-	game._start_nightmare_run()
+	game.mode = GameManager.MODE_NIGHTMARE
+	game.start_game()
 	_check_run(game, "NIGHTMARE")
 	_check(game.mode == GameManager.MODE_NIGHTMARE and not game.tutorial_active and not game.meta_ui.visible and (game.player.get_node("Body") as PlayerVisual).skin_id == "F1", "NIGHTMARE-DIRECT", "selected=F1 character_select=false")
 	root.content_scale_size = Vector2i.ZERO

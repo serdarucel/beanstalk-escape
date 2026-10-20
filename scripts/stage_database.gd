@@ -278,9 +278,6 @@ static func _hazard(kind: String, lane: int, count := 1) -> Dictionary:
 	if kind == "BEAN": result["count"] = count
 	return result
 
-static func _multi_hazard(kind: String, lanes: Array) -> Dictionary:
-	return {"kind": kind, "lanes": lanes.duplicate()}
-
 static func _late_stage(number: int, title: String, theme: String, witness: Array, rows: Array, skill := "none", junction := false) -> Dictionary:
 	var encounters: Array = []
 	for index in rows.size():
@@ -359,57 +356,6 @@ static func _has_action_conflict(recipe: Dictionary) -> bool:
 
 static func _transfer_seconds(from_route: int, to_route: int) -> float:
 	return float(absi(to_route - from_route)) * (Balance.BRANCH_TRANSITION_SECONDS * 0.5 + Balance.BRANCH_COMMAND_BUFFER_SECONDS)
-
-## Read-only validation keeps all reachable solutions, rather than independently
-## picking incompatible best pairs. Heights are global across chunk boundaries.
-static func validate_sequence(stages: Array) -> Dictionary:
-	var encounters := 0
-	var unsolvable := 0
-	var violations := 0
-	var min_window := INF
-	var previous_end := 0.0
-	var previous_recipe := {}
-	var frontier := {}
-	var speed := Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE
-	for stage_value: Dictionary in stages:
-		var start := float(stage_value.get("start_height", 0.0))
-		for encounter: Dictionary in stage_value.encounters:
-			encounters += 1
-			if _has_action_conflict(encounter.recipe):
-				violations += 1
-			var solutions := encounter_solutions(encounter.recipe)
-			if solutions.is_empty():
-				unsolvable += 1
-				violations += 1
-				frontier.clear()
-				continue
-			var next_frontier := {}
-			for solution: Dictionary in solutions:
-				var route := int(solution.route)
-				var best := INF if frontier.is_empty() else -INF
-				for previous_route in frontier:
-					# Every required command must remain possible at the speed cap.
-					# A lane clear in both recipes needs no new command when staying
-					# on it; it still inherits the entire path's earlier bottleneck.
-					var staying_clear := int(previous_route) == route and String(solution.action) == "none" and route_survives(previous_recipe, route)
-					var window := INF if staying_clear else (start + float(encounter.anchor) - previous_end) / speed - _transfer_seconds(int(previous_route), route)
-					best = maxf(best, minf(float(frontier[previous_route]), window))
-				# Several actions may end on the same lane; keep its best path.
-				next_frontier[route] = maxf(float(next_frontier.get(route, -INF)), best)
-			if not frontier.is_empty():
-				var best_window := -INF
-				for value in next_frontier.values():
-					best_window = maxf(best_window, float(value))
-				min_window = minf(min_window, best_window)
-				if best_window + 0.0000001 < MIN_REACTION_SECONDS:
-					violations += 1
-					# Resume diagnostics after this failed boundary, without hiding it.
-					for route in next_frontier:
-						next_frontier[route] = INF
-			frontier = next_frontier
-			previous_end = start + float(encounter.get("occupancy", [encounter.anchor, float(encounter.anchor) + OCCUPANCY_HEIGHT])[1])
-			previous_recipe = encounter.recipe
-	return {"encounters": encounters, "unsolvable": unsolvable, "min_window_seconds": min_window, "violations": violations}
 
 ## Called after anchor pacing and again after runtime dead-end insertion. The
 ## previous solution survives cache eviction, so even a long run is paced safely.
@@ -626,53 +572,6 @@ static func _endless_encounters(stage_value: Dictionary, stream: Dictionary) -> 
 		result.append({"id": "S%02d-E%02d" % [int(stage_value.number), index + 1], "anchor": anchor, "occupancy_height": 90, "recipe": recipe, "witness": int(chosen.route), "action_class": classes[action_class], "objective": "Read the threat, then breathe."})
 		anchor += 90 + int(ceil(Balance.PLAYER_VERTICAL_SPEED * Balance.speed_scale_for_time(seconds) * (2.2 if tier > 0 else 1.2)))
 	return result
-
-static func _add_endless_dead_end(stage: Dictionary, stream: Dictionary) -> void:
-	for index in stage.encounters.size():
-		var encounter: Dictionary = stage.encounters[index]
-		var seconds := Balance.estimated_time_for_height(float(stage.start_height) + float(encounter.anchor))
-		if seconds < ENDLESS_DEAD_END_FIRST_SECONDS or seconds - float(stream.last_dead_end_time) < ENDLESS_DEAD_END_INTERVAL_SECONDS:
-			continue
-		var witness := int(encounter.witness)
-		var solutions := encounter_solutions(encounter.recipe)
-		if not solutions.any(func(solution: Dictionary) -> bool: return int(solution.route) == witness):
-			continue
-		# Prefer an otherwise usable branch. If hazards already cover both
-		# alternatives, runtime slots on the closed branch are omitted instead.
-		for prefer_free in [true, false]:
-			for lane_value in stream.lane_order:
-				var closed := int(lane_value)
-				if absi(closed - witness) != 1:
-					continue
-				if prefer_free and not solutions.any(func(solution: Dictionary) -> bool: return int(solution.route) == closed):
-					continue
-				if not _dead_end_preserves_transfers(stage, index, closed):
-					continue
-				var supports: Array = stream.lane_order.duplicate()
-				supports.erase(closed)
-				var threats := threats_for_recipe(encounter.recipe).duplicate(true)
-				threats.append({"kind": "FORK", "supports": supports})
-				encounter.recipe = {"kind": "COMBO", "threats": threats}
-				return
-
-static func _dead_end_preserves_transfers(stage: Dictionary, index: int, closed: int) -> bool:
-	var encounter: Dictionary = stage.encounters[index]
-	var witness := int(encounter.witness)
-	if index > 0:
-		var previous: Dictionary = stage.encounters[index - 1]
-		if float(previous.occupancy[1]) > float(encounter.anchor) and closed >= mini(int(previous.witness), witness) and closed <= maxi(int(previous.witness), witness):
-			return false
-	if index + 1 < stage.encounters.size():
-		var next: Dictionary = stage.encounters[index + 1]
-		if closed >= mini(witness, int(next.witness)) and closed <= maxi(witness, int(next.witness)):
-			# A transfer across the missing branch must wait for its return.
-			# Use the full 2x speed and unshortened transfer time conservatively.
-			var required_rise := float(absi(int(next.witness) - witness)) * Balance.PLAYER_VERTICAL_SPEED * Balance.ENDLESS_MAX_SPEED_SCALE * (Balance.BRANCH_TRANSITION_SECONDS + Balance.BRANCH_COMMAND_BUFFER_SECONDS)
-			if float(next.anchor) - float(encounter.occupancy[1]) < required_rise:
-				return false
-	# The last occupancy ends at the chunk boundary; the next chunk has at
-	# least WARNING_LEAD pixels of fully supported entry for either witness.
-	return true
 
 static func _mirror_recipe(recipe: Dictionary) -> void:
 	match String(recipe.kind):

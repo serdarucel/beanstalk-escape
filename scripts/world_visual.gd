@@ -127,15 +127,6 @@ func _collect_crowns() -> void:
 func _draw_trunk(camera_top: float) -> void:
 	_draw_tiled_strip(TRUNK_TEXTURE, 0.0, camera_top, camera_top + _visible_size().y, 0.0)
 
-func _body_section(_world_y: float) -> Vector2:
-	return Vector2(0.0, TRUNK_BODY_WIDTH)
-
-func _main_stem_center_x(_world_y: float) -> float:
-	return 0.0
-
-func _main_stem_width(_world_y: float) -> float:
-	return TRUNK_BODY_WIDTH
-
 func _trunk_center_x(_world_y: float) -> float:
 	return 0.0
 
@@ -276,25 +267,8 @@ func _draw_branch_tip_detail(base: Vector2, direction: Vector2, route: int, is_r
 	draw_texture_rect(dead_end_texture, Rect2(-Vector2(128, 506) * scale, dead_end_texture.get_size() * scale), false)
 	draw_set_transform(Vector2.ZERO)
 
-func sky_color_at(normalized_y: float) -> Color:
-	return SKY_TOP.lerp(SKY_BOTTOM, clampf(normalized_y, 0.0, 1.0))
-
 func qa_branch_visual_deviation(route: int, world_y: float) -> float:
 	return absf(_branch_visual_x(route, world_y) - float(Balance.ROUTE_X[route]))
-
-func qa_point_inside_support(world_point: Vector2) -> bool:
-	if stages == null:
-		return absf(world_point.x) <= TRUNK_BODY_WIDTH * 0.5
-	var stage_number := stages.stage_for_y(world_point.y)
-	if stage_number <= 2:
-		return absf(world_point.x) <= TRUNK_BODY_WIDTH * 0.5
-	var length := stages.stage_length(stage_number)
-	var progress := (stages.stage_bottom_y(stage_number) - world_point.y) / length
-	for route in 3:
-		for segment: Array in stages.support_segments(stage_number, route):
-			if progress >= float(segment[0]) and progress <= float(segment[1]) and absf(world_point.x - _branch_visual_x(route, world_point.y)) <= VINE_BODY_WIDTH * 0.5:
-				return true
-	return false
 
 func qa_visual_contract() -> Dictionary:
 	return {

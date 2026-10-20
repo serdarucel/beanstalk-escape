@@ -106,11 +106,6 @@ func _discard_before(number: int) -> void:
 	runtime_webs = runtime_webs.filter(func(item: Dictionary) -> bool: return int(item.stage) >= first_stage)
 	StageDatabase.retain_from(first_stage, run_variant)
 
-func _rebuild_pattern_cache() -> void:
-	pattern_by_stage.clear()
-	for pattern: Dictionary in patterns:
-		pattern_by_stage[int(pattern.stage)] = pattern
-
 func clear_runtime_hazards() -> void:
 	runtime_breaks.clear()
 	runtime_webs.clear()
@@ -122,14 +117,6 @@ func set_runtime_break(_stage_number: int, _route: int, _start_height: float, _e
 func set_runtime_web(_stage_number: int, _route: int, _start_height: float, _end_height: float, _enabled: bool) -> void:
 	# Web traps are disabled in the endless runner.
 	pass
-
-func _set_runtime_hazard(target: Array, stage_number: int, route: int, start_height: float, end_height: float, enabled: bool) -> void:
-	for index in range(target.size() - 1, -1, -1):
-		var item: Dictionary = target[index]
-		if int(item.stage) == stage_number and int(item.route) == route and is_equal_approx(float(item.start), start_height):
-			target.remove_at(index)
-	if enabled:
-		target.append({"stage": stage_number, "route": route, "start": start_height, "end": end_height})
 
 func _runtime_hazard_at(target: Array, stage_number: int, route: int, progress: float) -> bool:
 	var height := progress * stage_length(stage_number)
@@ -155,10 +142,6 @@ func transfer_window_open(stage_number: int, progress: float) -> bool:
 			return true
 		previous_end = float(encounter.occupancy[1])
 	return false
-func generate_patterns(seed_value: int) -> Array:
-	StageDatabase.set_run_seed(seed_value)
-	return _patterns_for_records(stage_records.values())
-
 func _patterns_for_records(source_stages: Array) -> Array:
 	var result: Array = []
 	for stage: Dictionary in source_stages:
@@ -219,7 +202,6 @@ func _routes_supported_over(stage: Dictionary, routes: Array, start: float, end:
 				result = result.filter(func(route: int) -> bool: return threat.supports.has(route))
 	return result
 
-func pattern_hash(seed_value: int) -> int: return hash(var_to_str(generate_patterns(seed_value)))
 func patterns_are_reachable(candidate: Array) -> bool:
 	var reachable_routes: Array[int] = []
 	for segment: Dictionary in candidate:
@@ -365,9 +347,6 @@ func has_recovery_edge(stage_number: int, from_route: int, to_route: int) -> boo
 			return true
 	return false
 
-func current_route_open(player_y: float, x: float) -> bool:
-	return is_route_open_at(stage_for_y(player_y), route_for_x(x), progress_in_stage(player_y))
-
 func next_dead_end_distance(player_y: float, x: float, active_route := -1) -> float:
 	var stage_number := stage_for_y(player_y)
 	var route := active_route if active_route >= 0 else route_for_x(x)
@@ -390,6 +369,3 @@ func open_routes_at(player_y: float) -> Array:
 		if is_route_open_at(stage_number, route, progress):
 			routes.append(route)
 	return routes
-
-func branch_targets_visible(player_y: float, viewport_height := 540.0) -> bool:
-	return stage_for_y(player_y) >= 3

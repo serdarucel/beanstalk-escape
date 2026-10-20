@@ -500,11 +500,6 @@ func _update_cosmetic_anchors() -> void:
 		outfit_effect.set_body_box(effect_size)
 		outfit_effect.visible = not outfit_effect.effect_name.is_empty()
 
-func play_celebration() -> void:
-	if _is_explorer():
-		return
-	celebrate_remaining = 0.75
-
 func preview_tick(delta: float) -> void:
 	if outfit_aura != null:
 		outfit_aura.set_preview_mode(true)

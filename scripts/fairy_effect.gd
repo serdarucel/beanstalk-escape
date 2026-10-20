@@ -110,7 +110,7 @@ func _draw_diamond(point: Vector2, radius: float, color: Color) -> void:
 		point + Vector2(0.0, radius), point + Vector2(-radius, 0.0),
 	]), color)
 
-func _svg_texture(body: String) -> ImageTexture:
+static func _svg_texture(body: String) -> ImageTexture:
 	var image := Image.new()
 	var svg := '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">%s</svg>' % body
 	if image.load_svg_from_string(svg) != OK:

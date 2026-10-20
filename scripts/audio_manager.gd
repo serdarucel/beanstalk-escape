@@ -186,9 +186,6 @@ func _record_event(event_name: String) -> void:
 func audio_event_snapshot() -> Array:
 	return audio_events.duplicate(true)
 
-func toggle_mute() -> void:
-	set_sound_enabled(not sound_enabled)
-
 func set_sound_enabled(value: bool) -> void:
 	sound_enabled = value
 	muted = not value

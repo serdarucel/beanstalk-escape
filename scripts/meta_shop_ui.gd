@@ -105,13 +105,6 @@ func open_character_select() -> void:
 	refresh()
 	call_deferred("_focus_start_button")
 
-func open_map() -> void:
-	mode = "MAP"
-	pending_double_gold = 0
-	visible = true
-	refresh()
-	call_deferred("_focus_first_map_action")
-
 func close() -> void:
 	preview_character_id = ""
 	preview_item = {}
@@ -435,16 +428,6 @@ func _double_treasure() -> void:
 	pending_double_gold = 0
 	platform_services.show_rewarded("double_treasure", func(): economy.grant_gold(reward); refresh())
 	refresh()
-
-func _focus_first_map_action() -> void:
-	if not visible or mode != "MAP":
-		return
-	for card in grid.get_children():
-		for node in card.find_children("*", "Button", true, false):
-			var button := node as Button
-			if not button.disabled:
-				button.grab_focus()
-				return
 
 func _base_card(title: String, subtitle: String) -> PanelContainer:
 	var card := PanelContainer.new()

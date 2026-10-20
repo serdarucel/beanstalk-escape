@@ -269,19 +269,6 @@ func snapshot() -> Dictionary:
 func value(key: String) -> int:
 	return int(config.get(key, 0))
 
-func _add_xp(amount: int) -> int:
-	xp += amount
-	run_xp += amount
-	var levels := 0
-	while xp >= threshold_for():
-		xp -= threshold_for()
-		level += 1
-		levels += 1
-		var reward := value("level_up_gold")
-		gold += reward
-		level_up.emit(level, reward)
-	return levels
-
 func _persist_and_emit() -> void:
 	if save_manager != null:
 		save_manager.write_meta(snapshot())

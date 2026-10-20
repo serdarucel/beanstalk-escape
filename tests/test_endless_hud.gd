@@ -46,7 +46,7 @@ func _run() -> void:
 	game._physics_process(0.0)
 	_check(is_equal_approx(game.score, before), "tutorial climb earns no score")
 	game.tutorial_active = false
-	game._start_final_cinematic()
+	game.app_state = GameManager.AppState.FINAL_CINEMATIC
 	game.player.position.y -= 100.0
 	game._physics_process(0.0)
 	_check(is_equal_approx(game.score, before), "final cinematic climb earns no score")

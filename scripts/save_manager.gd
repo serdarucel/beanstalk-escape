@@ -185,29 +185,6 @@ func unlock_nightmare() -> bool:
 	profile["replay"] = replay
 	return _write_profile()
 
-func record_completion(mode: String, active_time: float, earned: Dictionary) -> bool:
-	if profile.is_empty():
-		load_profile()
-	var normalized_mode := "NIGHTMARE" if mode.to_upper() == "NIGHTMARE" else "NORMAL"
-	var replay: Dictionary = _sanitize_replay(profile.get("replay", {}))
-	var records: Dictionary = replay.records.duplicate(true)
-	var record: Dictionary = records[normalized_mode].duplicate(true)
-	record["completions"] = int(record.completions) + 1
-	var previous_best := float(record.best_time)
-	if active_time > 0.0 and (previous_best <= 0.0 or active_time < previous_best):
-		record["best_time"] = active_time
-	records[normalized_mode] = record
-	replay["records"] = records
-	if normalized_mode == "NORMAL":
-		replay["nightmare_unlocked"] = true
-		var badges: Dictionary = replay.challenges.duplicate(true)
-		for challenge in CHALLENGE_NAMES:
-			if bool(earned.get(challenge, false)):
-				badges[challenge] = true
-		replay["challenges"] = badges
-	profile["replay"] = replay
-	return _write_profile()
-
 func write_meta(meta: Dictionary) -> bool:
 	if profile.is_empty():
 		load_profile()
@@ -221,25 +198,6 @@ func write_meta_and_shop(meta: Dictionary, shop: Dictionary) -> bool:
 	profile["version"] = SAVE_VERSION
 	profile["meta"] = _meta_for_write(meta)
 	profile["shop"] = _sanitize_shop(shop)
-	return _write_profile()
-
-func add_gold(amount: int) -> bool:
-	if profile.is_empty():
-		load_profile()
-	var meta: Dictionary = profile.get("meta", {}).duplicate(true)
-	meta["gold"] = maxi(int(meta.get("gold", 0)) + amount, 0)
-	profile["meta"] = meta
-	return _write_profile()
-
-func mark_stage_skipped(stage_number: int) -> bool:
-	if profile.is_empty():
-		load_profile()
-	var progression: Dictionary = profile.get("progression", {}).duplicate(true)
-	var skipped: Array = progression.get("skipped_stages", []).duplicate()
-	if not skipped.has(stage_number):
-		skipped.append(stage_number)
-	progression["skipped_stages"] = skipped
-	profile["progression"] = progression
 	return _write_profile()
 
 func mark_stage_completed(stage_number: int) -> bool:

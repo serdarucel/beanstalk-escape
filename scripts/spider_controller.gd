@@ -95,9 +95,6 @@ func far_gap() -> float:
 	var below_player := camera.get_screen_center_position().y + visible_height * 0.5 - player.global_position.y
 	return maxf(below_player + 24.0, Balance.DANGER_GAP)
 
-func audio_level() -> float:
-	return 1.0 - clampf((distance_to_player() - Balance.DANGER_GAP) / maxf(far_gap() - Balance.DANGER_GAP, 1.0), 0.0, 1.0)
-
 func _start_gap_transition(target_gap: float, seconds: float) -> void:
 	_gap_transition_from = maxf(distance_to_player(), Balance.DANGER_GAP)
 	_gap_transition_to = target_gap
@@ -163,10 +160,6 @@ func distance_to_player() -> float:
 	if player == null:
 		return Balance.START_DISTANCE
 	return maxf(global_position.y - player.global_position.y, 0.0)
-
-static func speed_ratio_for_distance(distance_px: float) -> float:
-	var c := clampf((distance_px - 180.0) / Balance.SPIDER_RAMP_SPAN, 0.0, 1.0)
-	return Balance.SPIDER_SPEED_RATIO + 0.12 * c
 
 static func pressure_profile(stage_number: int) -> Dictionary:
 	for band: Dictionary in Balance.SPIDER_PRESSURE_BANDS:

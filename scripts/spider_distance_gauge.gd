@@ -18,12 +18,6 @@ func update_from_positions(player_y: float, spider_y: float) -> void:
 		last_draw_level = level
 		queue_redraw()
 
-func level_for(value: float) -> String:
-	for name: String in Balance.GAUGE_THRESHOLDS:
-		if value <= Balance.GAUGE_THRESHOLDS[name]:
-			return name
-	return "DANGER"
-
 static func level_for_gap(gap: float) -> String:
 	if gap >= 240.0: return "GREEN"
 	if gap >= 180.0: return "YELLOW"
