@@ -2091,7 +2091,7 @@ func _setup_hud() -> void:
 	$HUD.add_child(mini)
 	mini.game = self
 	_add_mute_button()
-	_add_action_button("RunPause", "Ⅱ", _pause_game)
+	_add_action_button("RunPause", "II", _pause_game)
 	meta_ui = MetaShopUI.new()
 	meta_ui.name = "MetaShop"
 	meta_ui.visible = false
